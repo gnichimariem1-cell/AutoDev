@@ -1,0 +1,10 @@
+gradio
+pydantic>=2
+requests
+fastapi
+uvicorn
+psycopg2-binary
+pytest
+pytest-cov
+pytest-json-report
+python-dotenv

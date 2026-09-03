@@ -2,19 +2,18 @@ import gradio as gr
 from src.common.schemas import BesoinUtilisateur
 from src.orchestrator import executer_pipeline
 
-def collecter_besoin(titre, description, utilisateurs, fonctionnalites, contraintes, delai):
+def collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure):
     besoin = BesoinUtilisateur(
         titre_projet=titre,
         description=description,
         utilisateurs_cibles=utilisateurs,
         fonctionnalites_cles=[f.strip() for f in fonctionnalites.split(",") if f.strip()],
-        contraintes_techniques=contraintes,
-        delai_souhaite=delai,
+        structure_projet=structure,
     )
     return besoin
 
-def lancer_pipeline_complet(titre, description, utilisateurs, fonctionnalites, contraintes, delai):
-    besoin = collecter_besoin(titre, description, utilisateurs, fonctionnalites, contraintes, delai)
+def lancer_pipeline_complet(titre, description, utilisateurs, fonctionnalites, structure):
+    besoin = collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure)
 
     resultat = executer_pipeline(besoin)
 
@@ -45,8 +44,7 @@ demo = gr.Interface(
         gr.Textbox(label="Description", lines=3, placeholder="Decris ton projet en quelques phrases"),
         gr.Textbox(label="Utilisateurs cibles", placeholder="Ex: Etudiants, particuliers..."),
         gr.Textbox(label="Fonctionnalites cles (separees par virgules)", placeholder="login, creer tache, marquer terminee"),
-        gr.Textbox(label="Contraintes techniques", placeholder="Optionnel"),
-        gr.Textbox(label="Delai souhaite", placeholder="Optionnel"),
+        gr.Textbox(label="Structure du projet", lines=2, placeholder="Ex: pages/sections souhaitees, organisation generale (optionnel)"),
     ],
     outputs=gr.Textbox(label="Resultat du pipeline", lines=12),
     title="AutoDev — Generateur de backend automatique",

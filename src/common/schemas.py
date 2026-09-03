@@ -2,13 +2,12 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 class BesoinUtilisateur(BaseModel):
-    """Sortie de l'Agent 1 (Formulaire)"""
+    """Sortie du Formulaire utilisateur"""
     titre_projet: str
     description: str
     utilisateurs_cibles: str
     fonctionnalites_cles: list[str]
-    contraintes_techniques: str = ""
-    delai_souhaite: str = ""
+    structure_projet: str = ""
 
 class UserStory(BaseModel):
     id: str

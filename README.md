@@ -18,6 +18,38 @@ python -m venv .venv
 pip install -r requirements.txt
 ollama pull qwen3
 ```
+## Lancer la base de données PostgreSQL (via Docker)
+
+Se placer dans le dossier du backend genere :
+
+    cd output/backend
+
+Puis lancer la base de donnees. Utiliser la commande correspondant a votre version de Docker :
+
+**Docker recent (Docker Desktop, Docker Engine 20.10+) :**
+
+    docker compose up -d db
+
+**Anciennes installations (docker-compose en script Python separe) :**
+
+    docker-compose up -d db
+
+Pour savoir laquelle utiliser, tester d'abord :
+
+    docker compose version
+
+Si cette commande echoue ("commande inconnue"), utiliser `docker-compose` (avec le tiret) a la place.
+
+### Verifier que la base tourne
+
+    docker ps
+
+Un conteneur nomme `backend-db-1` (ou similaire) doit apparaitre, avec le port 5432 ouvert.
+### Verifier que la base tourne
+
+    docker ps
+
+Un conteneur nomme `backend-db-1` (ou similaire) doit apparaitre, avec le port 5432 ouvert.
 
 ## Lancer le formulaire
 

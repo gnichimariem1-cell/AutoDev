@@ -1,0 +1,21 @@
+services:
+  autodev:
+    build: .
+    ports:
+      - "7860:7860"
+    env_file:
+      - .env
+    environment:
+      # Par defaut on joint l'Ollama installe sur la machine hote.
+      # Adapter dans .env si Ollama tourne ailleurs.
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434/api/generate}
+    extra_hosts:
+      # Permet au conteneur de resoudre host.docker.internal (Linux inclus).
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Les backends generes par le pipeline sont persistes sur l'hote.
+      - ./output:/app/output
+      # Decommenter pour utiliser une session Claude Code deja authentifiee
+      # sur l'hote au lieu de ANTHROPIC_API_KEY :
+      # - ~/.claude:/root/.claude:ro
+      # - ~/.claude.json:/root/.claude.json:ro

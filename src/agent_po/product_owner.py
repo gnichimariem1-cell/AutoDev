@@ -1,11 +1,13 @@
+import difflib
 import json
+import os
 import re
 import unicodedata
 import requests
 from src.common.schemas import BesoinUtilisateur, SortiePO
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "qwen3"
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")
+MODEL = os.environ.get("OLLAMA_MODEL", "qwen3")
 
 PROMPT_TEMPLATE = """Tu es un Product Owner. À partir du besoin ci-dessous, génère des User Stories
 au format JSON STRICT (rien d'autre que le JSON), avec ce schéma EXACT (respecte precisement
@@ -42,7 +44,13 @@ def _normaliser_cles(obj):
         nouveau = {}
         for k, v in obj.items():
             cle_simple = _cle_simplifiee(k)
-            cle_corrigee = CHAMPS_SIMPLIFIES.get(cle_simple, k)
+            if cle_simple in CHAMPS_SIMPLIFIES:
+                cle_corrigee = CHAMPS_SIMPLIFIES[cle_simple]
+            else:
+                proches = difflib.get_close_matches(
+                    cle_simple, CHAMPS_SIMPLIFIES.keys(), n=1, cutoff=0.6
+                )
+                cle_corrigee = CHAMPS_SIMPLIFIES[proches[0]] if proches else k
             nouveau[cle_corrigee] = _normaliser_cles(v)
         return nouveau
     if isinstance(obj, list):

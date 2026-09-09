@@ -32,3 +32,14 @@ class RapportQA(BaseModel):
     couverture_pct: float
     succes: bool
     erreurs: list[str] = []
+
+class SortieFrontend(BaseModel):
+    """Sortie de l'Agent Frontend"""
+    fichiers_generes: list[str]
+    resume_technique: str
+
+class RapportQAFrontend(BaseModel):
+    """Sortie de la verification QA du frontend"""
+    fichiers_verifies: list[str]
+    succes: bool
+    erreurs: list[str] = []

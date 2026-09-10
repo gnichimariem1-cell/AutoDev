@@ -10,6 +10,16 @@ def generer_code(user_stories: SortiePO, dossier_sortie: str = "output/backend")
     Path(dossier_sortie).mkdir(parents=True, exist_ok=True)
     prompt = f"""Génère une API FastAPI + PostgreSQL dans {dossier_sortie} pour ces User Stories :
 {user_stories.model_dump_json(indent=2)}
+
+Inclus également, pour que n'importe qui puisse lancer le backend avec Docker :
+- un Dockerfile pour l'application FastAPI (image python slim, installation des
+  dependances, exposition du port 8000)
+- un docker-compose.yml avec deux services : "app" (le backend) et "db"
+  (postgres:16, avec un volume nomme pour persister les donnees et les
+  variables d'environnement POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB)
+- un fichier .env.example listant les variables necessaires (DATABASE_URL,
+  SECRET_KEY, etc.), coherentes avec docker-compose.yml
+
 Écris les fichiers directement sur disque."""
 
     resultat = subprocess.run(

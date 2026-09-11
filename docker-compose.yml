@@ -17,5 +17,5 @@ services:
       - .:/app
       # Decommenter pour utiliser une session Claude Code deja authentifiee
       # sur l'hote au lieu de ANTHROPIC_API_KEY :
-      # - ~/.claude:/root/.claude:ro
-      # - ~/.claude.json:/root/.claude.json:ro
+      - ~/.claude:/root/.claude:ro
+      - ~/.claude.json:/root/.claude.json:ro

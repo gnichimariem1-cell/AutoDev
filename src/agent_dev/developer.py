@@ -33,7 +33,9 @@ DATABASE_URL par défaut du code, sans dépendre d'un conteneur externe préexis
         encoding="utf-8", errors="replace",
     )
     if resultat.returncode != 0:
-        raise RuntimeError(f"Claude Code a échoué : {resultat.stderr}")
+        raise RuntimeError(
+            f"Claude Code a échoué : {resultat.stdout}\n{resultat.stderr}"
+        )
 
     fichiers = [str(p) for p in Path(dossier_sortie).rglob("*.py")]
     return SortieDev(fichiers_generes=fichiers, resume_technique=resultat.stdout[:500])
@@ -49,6 +51,8 @@ def appliquer_corrections(rapport_erreurs: list[str], dossier_sortie: str = "out
         encoding="utf-8", errors="replace",
     )
     if resultat.returncode != 0:
-        raise RuntimeError(f"Correction échouée : {resultat.stderr}")
+        raise RuntimeError(
+            f"Correction échouée : {resultat.stdout}\n{resultat.stderr}"
+        )
     fichiers = [str(p) for p in Path(dossier_sortie).rglob("*.py")]
     return SortieDev(fichiers_generes=fichiers, resume_technique=resultat.stdout[:500])

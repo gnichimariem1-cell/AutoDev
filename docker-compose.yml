@@ -14,7 +14,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       # Les backends generes par le pipeline sont persistes sur l'hote.
-      - ./output:/app/output
+      - .:/app
       # Decommenter pour utiliser une session Claude Code deja authentifiee
       # sur l'hote au lieu de ANTHROPIC_API_KEY :
       # - ~/.claude:/root/.claude:ro

@@ -20,6 +20,10 @@ Inclus également, pour que n'importe qui puisse lancer le backend avec Docker :
 - un fichier .env.example listant les variables necessaires (DATABASE_URL,
   SECRET_KEY, etc.), coherentes avec docker-compose.yml
 
+Le projet généré doit être autonome : sur une machine tierce, `docker compose up -d db`
+dans {dossier_sortie} doit suffire à démarrer une base de données compatible avec le
+DATABASE_URL par défaut du code, sans dépendre d'un conteneur externe préexistant.
+
 Écris les fichiers directement sur disque."""
 
     resultat = subprocess.run(

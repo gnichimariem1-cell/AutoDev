@@ -46,6 +46,11 @@ Details :
 
 ## Lancer la base de données PostgreSQL (via Docker)
 
+Le Developer Agent génère un `docker-compose.yml` autonome dans `output/backend`, avec un
+service `db` dont les identifiants correspondent au `DATABASE_URL` par défaut du code généré.
+Aucun conteneur externe préexistant n'est nécessaire : ce fichier suffit sur n'importe quelle
+machine.
+
 Se placer dans le dossier du backend genere :
 
     cd output/backend
@@ -66,11 +71,6 @@ Pour savoir laquelle utiliser, tester d'abord :
 
 Si cette commande echoue ("commande inconnue"), utiliser `docker-compose` (avec le tiret) a la place.
 
-### Verifier que la base tourne
-
-    docker ps
-
-Un conteneur nomme `backend-db-1` (ou similaire) doit apparaitre, avec le port 5432 ouvert.
 ### Verifier que la base tourne
 
     docker ps

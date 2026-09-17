@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+﻿from pydantic import BaseModel, Field
 from typing import Literal
 
 class BesoinUtilisateur(BaseModel):
@@ -19,6 +19,12 @@ class UserStory(BaseModel):
 class SortiePO(BaseModel):
     """Sortie de l'Agent 2 (Product Owner)"""
     user_stories: list[UserStory]
+
+class SortieArchitecte(BaseModel):
+    """Sortie de l'Architect Agent"""
+    stack_technique: list[str]
+    structure_modules: list[str]
+    justification: str
 
 class SortieDev(BaseModel):
     """Sortie de l'Agent 3 (Developer)"""
@@ -43,3 +49,8 @@ class RapportQAFrontend(BaseModel):
     fichiers_verifies: list[str]
     succes: bool
     erreurs: list[str] = []
+
+class SortieDockerization(BaseModel):
+    """Sortie du Dockerization Agent"""
+    fichiers_generes: list[str]
+    resume_technique: str

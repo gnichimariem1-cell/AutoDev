@@ -1,17 +1,29 @@
-import subprocess
+﻿import subprocess
 import json
 import shutil
 from pathlib import Path
-from src.common.schemas import SortiePO, SortieDev
+from src.common.schemas import SortiePO, SortieDev, SortieArchitecte
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
 
-def generer_code(user_stories: SortiePO, dossier_sortie: str = "output/backend") -> SortieDev:
+def generer_code(user_stories: SortiePO, dossier_sortie: str = "output/backend", architecture: SortieArchitecte | None = None) -> SortieDev:
     Path(dossier_sortie).mkdir(parents=True, exist_ok=True)
+
+    if architecture:
+        bloc_architecture = f"""Respecte cette architecture, definie par l'Architect Agent :
+- Stack technique : {", ".join(architecture.stack_technique)}
+- Structure des modules :
+{chr(10).join("  - " + m for m in architecture.structure_modules)}
+- Justification : {architecture.justification}
+
+"""
+    else:
+        bloc_architecture = ""
+
     prompt = f"""Génère une API FastAPI + PostgreSQL dans {dossier_sortie} pour ces User Stories :
 {user_stories.model_dump_json(indent=2)}
 
-Inclus également, pour que n'importe qui puisse lancer le backend avec Docker :
+{bloc_architecture}Inclus également, pour que n'importe qui puisse lancer le backend avec Docker :
 - un Dockerfile pour l'application FastAPI (image python slim, installation des
   dependances, exposition du port 8000)
 - un docker-compose.yml avec deux services : "app" (le backend) et "db"

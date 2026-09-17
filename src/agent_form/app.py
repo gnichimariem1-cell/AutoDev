@@ -1,6 +1,6 @@
-import gradio as gr
+﻿import gradio as gr
 from src.common.schemas import BesoinUtilisateur
-from src.orchestrator import executer_pipeline
+from src.agent_orchestrateur.orchestrateur import executer_pipeline
 
 def collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure):
     besoin = BesoinUtilisateur(
@@ -23,7 +23,12 @@ def lancer_pipeline_complet(titre, description, utilisateurs, fonctionnalites, s
     if resultat["succes"]:
         rapport_be = resultat["rapport_backend"]
         rapport_fe = resultat["rapport_frontend"]
+        architecture = resultat.get("architecture")
+        stack = ", ".join(architecture.stack_technique) if architecture else "?"
         message = f"""✅ SUCCES — Backend + Frontend generes
+
+Architecture (Architect Agent) :
+  Stack technique : {stack}
 
 Backend (tentative {resultat['tentative_backend']}) :
   Tests passes : {rapport_be.tests_passes}
@@ -33,6 +38,9 @@ Backend (tentative {resultat['tentative_backend']}) :
 Frontend (tentative {resultat['tentative_frontend']}) :
   Fichiers verifies : {len(rapport_fe.fichiers_verifies)}
   Statut : OK
+
+Dockerization :
+  Fichiers generes : {len(resultat['rapport_dockerisation'].fichiers_generes)} (Dockerfile, docker-compose.yml, ...)
 
 Code source genere dans : output/backend/ et output/frontend/
 """

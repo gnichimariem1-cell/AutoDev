@@ -1,17 +1,26 @@
-# AutoDev — MVP Multi-Agents
+﻿# AutoDev â€” MVP Multi-Agents
 
-Pipeline automatisé qui génère un backend FastAPI **et** un frontend web complets à partir d'un besoin utilisateur, via des agents IA orchestrés.
+Pipeline automatisÃ© qui gÃ©nÃ¨re un backend FastAPI **et** un frontend web complets Ã  partir d'un besoin utilisateur, via des agents IA orchestrÃ©s.
 
 ## Architecture
-Formulaire utilisateur (Gradio)
-→ Product Owner Agent (Qwen3 via Ollama)
-→ Developer Agent (Claude Code + FastAPI)
-→ QA Agent Backend (Pytest + coverage.py)
-  ↳ boucle de correction (max 3 tentatives)
-→ Frontend Agent (Claude Code + HTML/CSS/JS vanilla, consomme l'API backend)
-→ QA Agent Frontend (verification index.html + validite syntaxique JS)
-  ↳ boucle de correction (max 3 tentatives)
-→ Livrables finaux (output/backend/ et output/frontend/)
+
+Le projet suit une organisation **MVC** : la Vue (`src/agent_form/app.py`, formulaire Gradio), le Controleur
+(`src/agent_orchestrateur/orchestrateur.py`, **Agent Orchestrateur** - coordonne les agents du Modele et gere
+les boucles de correction), et le Modele (les agents metier : `agent_po`, `agent_architect`, `agent_dev`,
+`agent_qa`, `agent_frontend`, `agent_dockerization`).
+
+Formulaire utilisateur (Gradio, Vue)
+-> Agent Orchestrateur (Controleur)
+-> Product Owner Agent (Qwen3 via Ollama)
+-> Architect Agent (Claude Code - propose stack technique et structure du projet, sans generer de code)
+-> Developer Agent (Claude Code + FastAPI, respecte architecture proposee)
+-> QA Agent Backend (Pytest + coverage.py)
+  boucle de correction (max MAX_TENTATIVES, defaut 3)
+-> Frontend Agent (Claude Code + HTML/CSS/JS vanilla, consomme API backend)
+-> QA Agent Frontend (verification index.html + validite syntaxique JS)
+  boucle de correction (max MAX_TENTATIVES, defaut 3)
+-> Dockerization Agent (Claude Code - genere Dockerfile + docker-compose.yml unifies pour backend+frontend+db)
+-> Agent Orchestrateur (Controleur) -> Livrables finaux (backend + frontend + config Docker), affiches par la Vue
 
 ## Installation
 
@@ -44,7 +53,7 @@ Details :
 - Les backends generes sont ecrits dans `./output`, monte en volume pour persister sur l'hote.
 - Raccourcis Makefile : `make docker-build`, `make docker-up`, `make docker-logs`, `make docker-down`.
 
-## Lancer la base de données PostgreSQL (via Docker)
+## Lancer la base de donnÃ©es PostgreSQL (via Docker)
 
 Se placer dans le dossier du backend genere :
 

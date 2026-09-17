@@ -45,7 +45,9 @@ def generer_frontend(
         encoding="utf-8", errors="replace",
     )
     if resultat.returncode != 0:
-        raise RuntimeError(f"Claude Code a échoué (frontend) : {resultat.stderr}")
+        raise RuntimeError(
+            f"Claude Code a échoué (frontend) : {resultat.stdout}\n{resultat.stderr}"
+        )
 
     return SortieFrontend(
         fichiers_generes=_lister_fichiers(dossier_sortie),
@@ -66,7 +68,9 @@ def appliquer_corrections_frontend(
         encoding="utf-8", errors="replace",
     )
     if resultat.returncode != 0:
-        raise RuntimeError(f"Correction échouée (frontend) : {resultat.stderr}")
+        raise RuntimeError(
+            f"Correction échouée (frontend) : {resultat.stdout}\n{resultat.stderr}"
+        )
 
     return SortieFrontend(
         fichiers_generes=_lister_fichiers(dossier_sortie),

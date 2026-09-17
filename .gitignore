@@ -9,3 +9,4 @@ output/
 rapport_pytest.json
 coverage.json
 .coverage
+logs/

@@ -1,4 +1,5 @@
 ﻿import subprocess
+import os
 import json
 import shutil
 from pathlib import Path
@@ -41,7 +42,7 @@ DATABASE_URL par défaut du code, sans dépendre d'un conteneur externe préexis
     resultat = subprocess.run(
         [CLAUDE_BIN, "-p", "--allowedTools", "Write,Edit,Bash"],
         input=prompt,
-        capture_output=True, text=True, timeout=600,
+        capture_output=True, text=True, timeout=int(os.environ.get("CLAUDE_TIMEOUT", 1200)),
         encoding="utf-8", errors="replace",
     )
     if resultat.returncode != 0:
@@ -59,7 +60,7 @@ def appliquer_corrections(rapport_erreurs: list[str], dossier_sortie: str = "out
     resultat = subprocess.run(
         [CLAUDE_BIN, "-p", "--allowedTools", "Write,Edit,Bash"],
         input=prompt,
-        capture_output=True, text=True, timeout=1200,
+        capture_output=True, text=True, timeout=int(os.environ.get("CLAUDE_TIMEOUT", 1200)),
         encoding="utf-8", errors="replace",
     )
     if resultat.returncode != 0:

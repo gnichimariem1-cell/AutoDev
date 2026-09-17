@@ -1,4 +1,5 @@
 ﻿import subprocess
+import os
 import shutil
 from src.common.schemas import SortiePO, SortieArchitecte
 
@@ -27,10 +28,10 @@ def generer_architecture(user_stories: SortiePO) -> SortieArchitecte:
     resultat = subprocess.run(
         [CLAUDE_BIN, "-p"],
         input=prompt,
-        capture_output=True, text=True, timeout=180,
+        capture_output=True, text=True, timeout=int(os.environ.get("CLAUDE_TIMEOUT", 1200)),
         encoding="utf-8", errors="replace",
     )
     if resultat.returncode != 0:
-        raise RuntimeError(f"Architect Agent a échoué : {resultat.stderr}")
+        raise RuntimeError(f"Architect Agent a échoué : {resultat.stdout}\n{resultat.stderr}")
 
     return SortieArchitecte.model_validate_json(resultat.stdout.strip())

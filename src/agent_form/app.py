@@ -1,6 +1,41 @@
-﻿import gradio as gr
+﻿import os
+import re
+import gradio as gr
 from src.common.schemas import BesoinUtilisateur
 from src.agent_orchestrateur.orchestrateur import executer_pipeline
+
+LONGUEUR_MAX_DESCRIPTION = 1000
+LONGUEUR_MAX_CHAMP_COURT = 200
+MOTIFS_SUSPECTS = [
+    r"ignor[ez]?\s+(les\s+)?(instructions|consignes)",
+    r"ignore\s+(previous|all)\s+instructions",
+    r"system\s*prompt",
+    r"\bact\s+as\b",
+]
+
+
+def valider_besoin(titre, description, utilisateurs, fonctionnalites, structure):
+    """Validation basique cote AutoDev, en complement des garde-fous propres
+    a Claude Code. Renvoie un message d'erreur (str) si invalide, ou None si OK.
+    """
+    champs_courts = {"Titre du projet": titre, "Utilisateurs cibles": utilisateurs}
+    for nom, valeur in champs_courts.items():
+        if valeur and len(valeur) > LONGUEUR_MAX_CHAMP_COURT:
+            return f"{nom} trop long (max {LONGUEUR_MAX_CHAMP_COURT} caracteres)."
+
+    if description and len(description) > LONGUEUR_MAX_DESCRIPTION:
+        return f"Description trop longue (max {LONGUEUR_MAX_DESCRIPTION} caracteres)."
+
+    texte_complet = " ".join(filter(None, [titre, description, utilisateurs, fonctionnalites, structure]))
+    for motif in MOTIFS_SUSPECTS:
+        if re.search(motif, texte_complet, re.IGNORECASE):
+            return (
+                "Le texte saisi contient un motif qui ressemble a une tentative "
+                "d'instruction destinee a l'IA plutot qu'a une description de projet. "
+                "Reformule ta demande."
+            )
+    return None
+
 
 def collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure):
     besoin = BesoinUtilisateur(
@@ -114,13 +149,6 @@ TOUTES_LES_SECTIONS = list(SECTIONS.keys())
 
 
 def construire_rapport_detaille(resultat, sections_choisies=None) -> str:
-    """Construit un rapport texte agent par agent. sections_choisies filtre
-    quelles sections apparaissent. None = tout afficher (valeur par defaut,
-    utilisee au tout premier appel) ; une liste (meme vide) = respecter
-    exactement ce qui est coche, y compris si l'utilisateur a tout decoche.
-    Les etapes non atteintes (pipeline arrete avant) sont marquees comme
-    telles plutot que simplement omises.
-    """
     if sections_choisies is None:
         sections_choisies = TOUTES_LES_SECTIONS
 
@@ -139,6 +167,10 @@ def construire_rapport_detaille(resultat, sections_choisies=None) -> str:
 
 
 def lancer_pipeline_complet(titre, description, utilisateurs, fonctionnalites, structure, sections_choisies):
+    erreur_validation = valider_besoin(titre, description, utilisateurs, fonctionnalites, structure)
+    if erreur_validation:
+        return f"❌ Entree refusee : {erreur_validation}", "{}", None
+
     besoin = collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure)
     resultat = executer_pipeline(besoin)
 
@@ -194,4 +226,15 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
     )
 
 if __name__ == "__main__":
-    demo.launch()
+    utilisateur = os.environ.get("GRADIO_AUTH_USER")
+    mot_de_passe = os.environ.get("GRADIO_AUTH_PASSWORD")
+    if utilisateur and mot_de_passe:
+        demo.launch(auth=(utilisateur, mot_de_passe))
+    else:
+        print(
+            "ATTENTION: GRADIO_AUTH_USER / GRADIO_AUTH_PASSWORD non definis dans .env — "
+            "le formulaire est lance SANS authentification. N'importe qui avec l'URL peut "
+            "declencher le pipeline (et consommer tes credits API). Definis ces 2 variables "
+            "dans .env pour proteger l'acces."
+        )
+        demo.launch()

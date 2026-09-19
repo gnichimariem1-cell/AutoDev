@@ -1,7 +1,7 @@
 ﻿import subprocess
-import os
 import json
 import shutil
+import os
 from pathlib import Path
 from src.common.schemas import SortiePO, SortieDev, SortieArchitecte
 
@@ -26,16 +26,13 @@ def generer_code(user_stories: SortiePO, dossier_sortie: str = "output/backend",
 
 {bloc_architecture}Inclus également, pour que n'importe qui puisse lancer le backend avec Docker :
 - un Dockerfile pour l'application FastAPI (image python slim, installation des
-  dependances, exposition du port 8000)
+  dependances, exposition du port 8000, utilisateur non-root pour executer
+  l'application — ne PAS rester en root dans le conteneur final)
 - un docker-compose.yml avec deux services : "app" (le backend) et "db"
   (postgres:16, avec un volume nomme pour persister les donnees et les
   variables d'environnement POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB)
 - un fichier .env.example listant les variables necessaires (DATABASE_URL,
   SECRET_KEY, etc.), coherentes avec docker-compose.yml
-
-Le projet généré doit être autonome : sur une machine tierce, `docker compose up -d db`
-dans {dossier_sortie} doit suffire à démarrer une base de données compatible avec le
-DATABASE_URL par défaut du code, sans dépendre d'un conteneur externe préexistant.
 
 Écris les fichiers directement sur disque."""
 
@@ -46,9 +43,7 @@ DATABASE_URL par défaut du code, sans dépendre d'un conteneur externe préexis
         encoding="utf-8", errors="replace",
     )
     if resultat.returncode != 0:
-        raise RuntimeError(
-            f"Claude Code a échoué : {resultat.stdout}\n{resultat.stderr}"
-        )
+        raise RuntimeError(f"Claude Code a échoué : {resultat.stdout}\n{resultat.stderr}")
 
     fichiers = [str(p) for p in Path(dossier_sortie).rglob("*.py")]
     return SortieDev(fichiers_generes=fichiers, resume_technique=resultat.stdout[:500])
@@ -64,8 +59,6 @@ def appliquer_corrections(rapport_erreurs: list[str], dossier_sortie: str = "out
         encoding="utf-8", errors="replace",
     )
     if resultat.returncode != 0:
-        raise RuntimeError(
-            f"Correction échouée : {resultat.stdout}\n{resultat.stderr}"
-        )
+        raise RuntimeError(f"Correction échouée : {resultat.stdout}\n{resultat.stderr}")
     fichiers = [str(p) for p in Path(dossier_sortie).rglob("*.py")]
     return SortieDev(fichiers_generes=fichiers, resume_technique=resultat.stdout[:500])

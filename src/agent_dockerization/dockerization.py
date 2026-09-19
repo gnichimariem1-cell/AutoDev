@@ -25,7 +25,8 @@ generees et validees :
 Ecris DANS LE DOSSIER {dossier_sortie}/ (pas ailleurs, surtout pas a la racine du
 projet AutoDev qui a deja son propre docker-compose.yml) :
 - un Dockerfile pour le backend (image python slim, installe les dependances de
-  {dossier_backend}/requirements.txt, expose le port 8000)
+  {dossier_backend}/requirements.txt, expose le port 8000, utilisateur non-root
+  pour executer l'application)
 - un docker-compose.yml avec 3 services : "app" (le backend, build depuis le
   Dockerfile ci-dessus), "frontend" (sert les fichiers statiques de
   {dossier_frontend}, par exemple via nginx:alpine ou un serveur simple), et "db"

@@ -2,7 +2,10 @@
 import re
 import gradio as gr
 from src.common.schemas import BesoinUtilisateur
+from dotenv import load_dotenv
 from src.agent_orchestrateur.orchestrateur import executer_pipeline
+
+load_dotenv()  # charge les variables de .env dans os.environ
 
 LONGUEUR_MAX_DESCRIPTION = 1000
 LONGUEUR_MAX_CHAMP_COURT = 200

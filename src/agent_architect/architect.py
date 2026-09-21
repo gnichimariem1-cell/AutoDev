@@ -1,9 +1,17 @@
-﻿import subprocess
+﻿import re
+import subprocess
 import os
 import shutil
 from src.common.schemas import SortiePO, SortieArchitecte
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
+
+
+def _extraire_json(texte: str) -> str:
+    """Claude Code encadre parfois sa reponse de balises markdown (```json ... ```)
+    malgre la consigne de repondre "sans texte autour" : on les retire si presentes."""
+    match = re.search(r"```(?:json)?\s*(.*?)\s*```", texte.strip(), re.DOTALL)
+    return match.group(1).strip() if match else texte.strip()
 
 PROMPT_SYSTEME = """Tu es un architecte logiciel. A partir des User Stories fournies, propose une
 architecture applicative pour une API FastAPI + PostgreSQL (backend) consommee par un frontend
@@ -34,4 +42,4 @@ def generer_architecture(user_stories: SortiePO) -> SortieArchitecte:
     if resultat.returncode != 0:
         raise RuntimeError(f"Architect Agent a échoué : {resultat.stdout}\n{resultat.stderr}")
 
-    return SortieArchitecte.model_validate_json(resultat.stdout.strip())
+    return SortieArchitecte.model_validate_json(_extraire_json(resultat.stdout))

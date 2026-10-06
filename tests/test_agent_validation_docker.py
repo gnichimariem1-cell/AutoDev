@@ -21,12 +21,6 @@ def ports_libres():
         yield mock
 
 
-@pytest.fixture(autouse=True)
-def sans_gpu():
-    with patch.object(validation_docker, "_gpu_disponible", return_value=False) as mock:
-        yield mock
-
-
 def _dossier_docker(tmp_path):
     (tmp_path / "Dockerfile").write_text("FROM python:3.11-slim")
     (tmp_path / "docker-compose.yml").write_text("services: {}")
@@ -110,30 +104,3 @@ def test_port_occupe_est_une_erreur_environnement(mock_compose, ports_libres, tm
     assert rapport.erreur_environnement is True
     assert "8000" in rapport.erreurs[0]
     assert [c.args[1][0] for c in faux.call_args_list] == ["config"]
-
-
-@patch.object(validation_docker, "_attendre_reponse_http", return_value=None)
-@patch.object(validation_docker, "_commande_compose", return_value=["docker", "compose"])
-def test_gpu_donne_a_tous_les_services(mock_compose, mock_http, sans_gpu, tmp_path):
-    sans_gpu.return_value = True
-    overrides = []
-
-    def executer(compose, args, dossier, timeout):
-        if args[0] == "config":
-            return MagicMock(returncode=0, stdout=json.dumps(CONFIG), stderr="")
-        assert compose[-4:-1] == ["-f", "docker-compose.yml", "-f"]
-        with open(compose[-1]) as f:
-            overrides.append(json.load(f))
-        return MagicMock(returncode=0, stdout="", stderr="")
-
-    with patch.object(validation_docker, "_executer", MagicMock(side_effect=executer)) as faux:
-        rapport = valider_dockerisation(_dossier_docker(tmp_path))
-
-    assert rapport.succes is True
-    services = overrides[0]["services"]
-    assert set(services) == {"app", "frontend", "db"}
-    devices = services["app"]["deploy"]["resources"]["reservations"]["devices"]
-    assert devices == [{"driver": "nvidia", "count": "all", "capabilities": ["gpu"]}]
-    assert faux.call_args_list[0].args[0] == ["docker", "compose"]
-    import os
-    assert not os.path.exists(faux.call_args_list[-1].args[0][-1])

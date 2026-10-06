@@ -18,6 +18,7 @@ MAX_TENTATIVES = int(os.environ.get("MAX_TENTATIVES", 3))
 
 class EtatPipeline(TypedDict, total=False):
     # Entrees (fournies par executer_pipeline)
+    id_run: str  # identifiant du run, sert a le reprendre apres un plantage
     besoin: BesoinUtilisateur
     dossier_backend: str
     dossier_frontend: str

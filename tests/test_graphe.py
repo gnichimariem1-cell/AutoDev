@@ -1,16 +1,9 @@
-from unittest.mock import patch, MagicMock
-
 from src.agent_orchestrateur.etat import MAX_TENTATIVES
 from src.agent_orchestrateur.graphe import construire_graphe, schema_markdown, FICHIER_SCHEMA, LIMITE_RECURSION
 from src.agent_orchestrateur.orchestrateur import executer_pipeline, executer_pipeline_en_direct
 from src.agent_orchestrateur.routage import continuer_ou_abandonner, router_qa_backend, router_qa_frontend, router_validation_docker
-from src.common.schemas import BesoinUtilisateur, RapportQA, RapportQAFrontend, RapportValidationDocker
-
-QA_OK = RapportQA(tests_passes=5, tests_echoues=0, couverture_pct=90, succes=True)
-QA_KO = RapportQA(tests_passes=2, tests_echoues=3, couverture_pct=40, succes=False, erreurs=["e1"])
-FE_OK = RapportQAFrontend(fichiers_verifies=["index.html"], succes=True)
-FE_KO = RapportQAFrontend(fichiers_verifies=["index.html"], succes=False, erreurs=["erreur JS"])
-DOCKER_KO = RapportValidationDocker(docker_disponible=True, succes=False, erreurs=["build : erreur"])
+from src.common.schemas import RapportValidationDocker
+from tests.sorties import BESOIN, QA_OK, QA_KO, FE_OK, FE_KO, DOCKER_KO
 
 
 # --- Routeurs : fonctions pures, aucun mock necessaire ---
@@ -86,27 +79,13 @@ def test_schema_docs_a_jour():
 
 # --- Pire cas : toutes les boucles vont jusqu'a la derniere tentative ---
 
-@patch("src.agent_orchestrateur.noeuds.valider_dockerisation", return_value=DOCKER_KO)
-@patch("src.agent_orchestrateur.noeuds.appliquer_corrections_dockerisation")
-@patch("src.agent_orchestrateur.noeuds.generer_dockerisation")
-@patch("src.agent_orchestrateur.noeuds.lancer_tests_frontend")
-@patch("src.agent_orchestrateur.noeuds.appliquer_corrections_frontend")
-@patch("src.agent_orchestrateur.noeuds.generer_frontend")
-@patch("src.agent_orchestrateur.noeuds.lancer_tests")
-@patch("src.agent_orchestrateur.noeuds.appliquer_corrections")
-@patch("src.agent_orchestrateur.noeuds.generer_code")
-@patch("src.agent_orchestrateur.noeuds.generer_architecture")
-@patch("src.agent_orchestrateur.noeuds.generer_user_stories")
-def test_pire_cas_reste_sous_la_limite_de_recursion(mock_po, mock_arch, mock_dev, mock_corr, mock_qa, mock_fe, mock_corr_fe, mock_qa_fe, mock_dock, mock_corr_dock, mock_valid_dock):
-    mock_po.return_value = MagicMock()
-    mock_arch.return_value = MagicMock()
-    mock_dock.return_value = MagicMock()
+def test_pire_cas_reste_sous_la_limite_de_recursion(agents):
     # backend et frontend ne reussissent qu'a la derniere tentative, docker echoue jusqu'au bout
-    mock_qa.side_effect = [QA_KO] * (MAX_TENTATIVES - 1) + [QA_OK]
-    mock_qa_fe.side_effect = [FE_KO] * (MAX_TENTATIVES - 1) + [FE_OK]
+    agents.lancer_tests.side_effect = [QA_KO] * (MAX_TENTATIVES - 1) + [QA_OK]
+    agents.lancer_tests_frontend.side_effect = [FE_KO] * (MAX_TENTATIVES - 1) + [FE_OK]
+    agents.valider_dockerisation.return_value = DOCKER_KO
 
-    besoin = BesoinUtilisateur(titre_projet="x", description="y", utilisateurs_cibles="z", fonctionnalites_cles=["a"])
-    resultat = executer_pipeline(besoin)
+    resultat = executer_pipeline(BESOIN)
 
     assert resultat["succes"] is False
     assert resultat["etape"] == "docker"
@@ -119,16 +98,8 @@ def test_pire_cas_reste_sous_la_limite_de_recursion(mock_po, mock_arch, mock_dev
 
 # --- Plantage d'un agent : le pipeline s'arrete proprement avec un rapport ---
 
-BESOIN = BesoinUtilisateur(titre_projet="x", description="y", utilisateurs_cibles="z", fonctionnalites_cles=["a"])
-
-
-@patch("src.agent_orchestrateur.noeuds.generer_frontend")
-@patch("src.agent_orchestrateur.noeuds.generer_code", side_effect=RuntimeError("credit Claude epuise"))
-@patch("src.agent_orchestrateur.noeuds.generer_architecture")
-@patch("src.agent_orchestrateur.noeuds.generer_user_stories")
-def test_plantage_agent_renvoie_un_rapport(mock_po, mock_arch, mock_dev, mock_fe):
-    mock_po.return_value = MagicMock()
-    mock_arch.return_value = MagicMock()
+def test_plantage_agent_renvoie_un_rapport(agents):
+    agents.generer_code.side_effect = RuntimeError("credit Claude epuise")
 
     resultat = executer_pipeline(BESOIN)
 
@@ -136,45 +107,26 @@ def test_plantage_agent_renvoie_un_rapport(mock_po, mock_arch, mock_dev, mock_fe
     assert resultat["etape"] == "developer"
     assert resultat["erreur"] == "RuntimeError : credit Claude epuise"
     assert "architecture" in resultat
-    mock_fe.assert_not_called()
+    agents.generer_frontend.assert_not_called()
 
 
-@patch("src.agent_orchestrateur.noeuds.generer_frontend")
-@patch("src.agent_orchestrateur.noeuds.appliquer_corrections", side_effect=TimeoutError("trop long"))
-@patch("src.agent_orchestrateur.noeuds.lancer_tests", return_value=QA_KO)
-@patch("src.agent_orchestrateur.noeuds.generer_code")
-@patch("src.agent_orchestrateur.noeuds.generer_architecture")
-@patch("src.agent_orchestrateur.noeuds.generer_user_stories")
-def test_plantage_pendant_une_correction(mock_po, mock_arch, mock_dev, mock_qa, mock_corr, mock_fe):
-    mock_po.return_value = MagicMock()
-    mock_arch.return_value = MagicMock()
-    mock_dev.return_value = MagicMock()
+def test_plantage_pendant_une_correction(agents):
+    agents.lancer_tests.return_value = QA_KO
+    agents.appliquer_corrections.side_effect = TimeoutError("trop long")
 
     resultat = executer_pipeline(BESOIN)
 
     assert resultat["succes"] is False
     assert resultat["etape"] == "correction_backend"
     assert "trop long" in resultat["erreur"]
-    assert mock_qa.call_count == 1
-    mock_fe.assert_not_called()
+    assert agents.lancer_tests.call_count == 1
+    agents.generer_frontend.assert_not_called()
 
 
 # --- Execution en direct : un evenement par noeud termine ---
 
-@patch("src.agent_orchestrateur.noeuds.valider_dockerisation", return_value=RapportValidationDocker(docker_disponible=True, succes=True))
-@patch("src.agent_orchestrateur.noeuds.generer_dockerisation")
-@patch("src.agent_orchestrateur.noeuds.lancer_tests_frontend")
-@patch("src.agent_orchestrateur.noeuds.generer_frontend")
-@patch("src.agent_orchestrateur.noeuds.appliquer_corrections")
-@patch("src.agent_orchestrateur.noeuds.lancer_tests")
-@patch("src.agent_orchestrateur.noeuds.generer_code")
-@patch("src.agent_orchestrateur.noeuds.generer_architecture")
-@patch("src.agent_orchestrateur.noeuds.generer_user_stories")
-def test_execution_en_direct_suit_les_noeuds(mock_po, mock_arch, mock_dev, mock_qa, mock_corr, mock_fe, mock_qa_fe, mock_dock, mock_valid):
-    mock_po.return_value = MagicMock()
-    mock_arch.return_value = MagicMock()
-    mock_qa.side_effect = [QA_KO, QA_OK]
-    mock_qa_fe.return_value = FE_OK
+def test_execution_en_direct_suit_les_noeuds(agents):
+    agents.lancer_tests.side_effect = [QA_KO, QA_OK]
 
     evenements = [(noeud, dict(etat)) for noeud, etat in executer_pipeline_en_direct(BESOIN)]
 

@@ -11,7 +11,7 @@ def test_collecter_besoin_produit_objet_valide():
 
 from unittest.mock import patch, MagicMock
 
-from src.agent_form.app import construire_rapport_detaille, lancer_pipeline_complet
+from src.agent_form.app import construire_rapport_detaille, lancer_pipeline_complet, reprendre_pipeline
 
 
 def test_rapport_en_cours_marque_les_etapes_en_attente():
@@ -31,9 +31,9 @@ def test_rapport_plantage_affiche_l_erreur():
 
 
 def test_lancer_pipeline_complet_met_a_jour_apres_chaque_etape():
-    plantage = {"succes": True, "etape": "architect", "erreur": "RuntimeError : boom"}
+    plantage = {"id_run": "run-1", "succes": True, "etape": "architect", "erreur": "RuntimeError : boom"}
     etats = [
-        ("po", {"succes": True, "user_stories": None}),
+        ("po", {"id_run": "run-1", "succes": True, "user_stories": None}),
         ("architect", plantage),
         ("echec", dict(plantage, succes=False)),
     ]
@@ -44,8 +44,27 @@ def test_lancer_pipeline_complet_met_a_jour_apres_chaque_etape():
     assert len(sorties) == 4
     assert sorties[1][0].startswith("⏳ EN COURS — derniere etape terminee : Product Owner Agent")
     assert sorties[2][0].startswith("⏳ ARRET EN COURS — plantage de : Architect Agent")
-    message_final, _, resultat_final, bouton = sorties[-1]
+    message_final, _, resultat_final, bouton_lancer, bouton_reprendre, id_run = sorties[-1]
     assert "PLANTAGE" in message_final
     assert "_en_cours" not in resultat_final
-    assert bouton["interactive"] is True
-    assert all(s[3]["interactive"] is False for s in sorties[:-1])
+    assert id_run == "run-1"
+    assert bouton_lancer["interactive"] is True and bouton_reprendre["interactive"] is True
+    assert all(s[3]["interactive"] is False and s[4]["interactive"] is False for s in sorties[:-1])
+
+
+def test_reprendre_pipeline_impossible_affiche_un_message():
+    sorties = list(reprendre_pipeline("run-inconnu", None))
+    assert len(sorties) == 1
+    assert sorties[0][0].startswith("⚠️ Reprise impossible : Aucun run 'run-inconnu'")
+    assert sorties[0][3]["interactive"] is True
+
+
+def test_reprendre_pipeline_suit_la_reprise():
+    sauvegarde = MagicMock(next=("developer",))
+    etats = [("developer", {"id_run": "run-1", "succes": True}), ("qa_backend", {"id_run": "run-1", "succes": True})]
+    with patch("src.agent_form.app.point_de_reprise", return_value=sauvegarde), \
+         patch("src.agent_form.app.reprendre_pipeline_en_direct", return_value=iter(etats)):
+        sorties = list(reprendre_pipeline(" run-1 ", None))
+
+    assert sorties[0][0] == "⏳ Reprise du run run-1 a l'etape developer..."
+    assert sorties[-1][0].startswith("✅ SUCCES")

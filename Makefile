@@ -1,4 +1,4 @@
-.PHONY: test test-po test-dev test-frontend test-qa test-form test-orchestrator test-validation-docker test-graphe graphe run pipeline docker-build docker-up docker-down docker-logs
+.PHONY: test test-po test-dev test-frontend test-qa test-form test-orchestrator test-validation-docker test-graphe graphe nettoyer-sauvegardes run pipeline docker-build docker-up docker-down docker-logs
 
 test:
 	pytest --cov=src --cov-report=term-missing
@@ -22,6 +22,9 @@ test-graphe:
 
 graphe:
 	python -m src.agent_orchestrateur.graphe
+
+nettoyer-sauvegardes:
+	rm -f checkpoints/pipeline.sqlite
 
 run:
 	python -m src.agent_form.app

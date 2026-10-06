@@ -1,6 +1,8 @@
 ﻿import gradio as gr
 from src.common.schemas import BesoinUtilisateur
-from src.agent_orchestrateur.orchestrateur import executer_pipeline_en_direct
+from src.agent_orchestrateur.orchestrateur import (
+    executer_pipeline_en_direct, reprendre_pipeline_en_direct, point_de_reprise, RepriseImpossible,
+)
 
 def collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure):
     besoin = BesoinUtilisateur(
@@ -199,24 +201,47 @@ def _user_stories_json(resultat) -> str:
     return user_stories.model_dump_json(indent=2) if user_stories else "{}"
 
 
-def lancer_pipeline_complet(titre, description, utilisateurs, fonctionnalites, structure, sections_choisies):
-    """Generateur : Gradio met a jour l'affichage a chaque `yield`, donc apres
-    chaque etape du pipeline. Le bouton est desactive pendant le run pour
-    eviter de lancer deux pipelines en parallele sur le meme dossier output/."""
-    besoin = collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure)
-    yield "⏳ Pipeline lance — Product Owner Agent en cours...", "{}", None, gr.update(interactive=False)
+def _boutons(actifs: bool):
+    """Mise a jour des boutons "Lancer" et "Reprendre" : desactives pendant un
+    run, pour eviter deux pipelines en parallele sur le meme dossier output/."""
+    return gr.update(interactive=actifs), gr.update(interactive=actifs)
 
+
+def _suivre_dans_la_vue(evenements, sections_choisies, id_run_affiche=""):
+    """Generateur : Gradio met a jour l'affichage a chaque `yield`, donc apres
+    chaque etape du pipeline. Sorties : rapport, User Stories JSON, etat,
+    bouton Lancer, bouton Reprendre, ID du run."""
     resultat = None
-    for noeud, etat in executer_pipeline_en_direct(besoin):
+    for noeud, etat in evenements:
         resultat = dict(etat, _en_cours=noeud)
         if noeud == "echec":
             continue  # le yield final ci-dessous affiche directement l'echec
         yield (construire_rapport_detaille(resultat, sections_choisies), _user_stories_json(resultat),
-               resultat, gr.update(interactive=False))
+               resultat, *_boutons(False), resultat["id_run"])
 
     resultat.pop("_en_cours")
     yield (construire_rapport_detaille(resultat, sections_choisies), _user_stories_json(resultat),
-           resultat, gr.update(interactive=True))
+           resultat, *_boutons(True), resultat["id_run"])
+
+
+def lancer_pipeline_complet(titre, description, utilisateurs, fonctionnalites, structure, sections_choisies):
+    besoin = collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure)
+    yield "⏳ Pipeline lance — Product Owner Agent en cours...", "{}", None, *_boutons(False), ""
+    yield from _suivre_dans_la_vue(executer_pipeline_en_direct(besoin), sections_choisies)
+
+
+def reprendre_pipeline(id_run, sections_choisies):
+    """Reprend un run qui a plante, a partir de l'etape qui a plante. L'ID est
+    rempli automatiquement apres chaque run ; il peut aussi etre colle a la main
+    (ex : apres un redemarrage de l'application, il figure dans logs/pipeline.log)."""
+    id_run = (id_run or "").strip()
+    try:
+        etape = ", ".join(point_de_reprise(id_run).next)
+    except RepriseImpossible as e:
+        yield f"⚠️ Reprise impossible : {e}", gr.update(), gr.update(), *_boutons(True), id_run
+        return
+    yield f"⏳ Reprise du run {id_run} a l'etape {etape}...", gr.update(), gr.update(), *_boutons(False), id_run
+    yield from _suivre_dans_la_vue(reprendre_pipeline_en_direct(id_run), sections_choisies)
 
 
 def rafraichir_affichage(sections_choisies, resultat):
@@ -240,6 +265,15 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
             fonctionnalites = gr.Textbox(label="Fonctionnalites cles (separees par virgules)", placeholder="login, creer tache, marquer terminee")
             structure = gr.Textbox(label="Organisation de l'interface", lines=2, placeholder="Ex: pages/sections souhaitees, organisation generale (optionnel)")
             bouton_lancer = gr.Button("Lancer le pipeline", variant="primary")
+            with gr.Row():
+                id_run = gr.Textbox(
+                    label="ID du run",
+                    placeholder="rempli automatiquement apres chaque run",
+                    info="Apres un plantage (credit Claude epuise, Ollama arrete...), "
+                         "corrige le probleme puis clique sur Reprendre : les etapes deja reussies ne sont pas refaites.",
+                    scale=3,
+                )
+                bouton_reprendre = gr.Button("Reprendre", scale=1)
 
         with gr.Column():
             sections_choisies = gr.CheckboxGroup(
@@ -251,11 +285,17 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
             user_stories_json = gr.Code(label="User Stories (JSON)", language="json", lines=14)
 
     resultat_state = gr.State(None)
+    sorties_run = [resultat_texte, user_stories_json, resultat_state, bouton_lancer, bouton_reprendre, id_run]
 
     bouton_lancer.click(
         fn=lancer_pipeline_complet,
         inputs=[titre, description, utilisateurs, fonctionnalites, structure, sections_choisies],
-        outputs=[resultat_texte, user_stories_json, resultat_state, bouton_lancer],
+        outputs=sorties_run,
+    )
+    bouton_reprendre.click(
+        fn=reprendre_pipeline,
+        inputs=[id_run, sections_choisies],
+        outputs=sorties_run,
     )
     sections_choisies.change(
         fn=rafraichir_affichage,

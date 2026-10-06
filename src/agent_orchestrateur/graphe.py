@@ -30,7 +30,7 @@ LIMITE_RECURSION = 6 + 3 * (2 * MAX_TENTATIVES - 1) + 5
 FICHIER_SCHEMA = Path("docs/pipeline.md")
 
 
-def construire_graphe():
+def construire_graphe(checkpointer=None):
     graphe = StateGraph(EtatPipeline)
 
     graphe.add_node("po", noeuds.noeud_po)
@@ -75,7 +75,7 @@ def construire_graphe():
 
     graphe.add_edge("echec", END)
 
-    return graphe.compile()
+    return graphe.compile(checkpointer=checkpointer)
 
 
 def schema_markdown() -> str:

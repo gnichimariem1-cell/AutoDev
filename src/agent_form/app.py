@@ -1,6 +1,13 @@
 ﻿import threading
 import time
 
+from dotenv import load_dotenv
+
+# Charge .env avant tout import qui lit l'environnement : les sous-processus `claude`
+# heritent ainsi de ANTHROPIC_API_KEY / CLAUDE_CONFIG_DIR (compte Claude du projet).
+# Les variables deja definies (ex. par docker compose) restent prioritaires.
+load_dotenv()
+
 import gradio as gr
 from src.common.schemas import BesoinUtilisateur
 from src.agent_orchestrateur.orchestrateur import (

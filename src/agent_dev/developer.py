@@ -30,14 +30,15 @@ est généré séparément par un autre agent et servi par son propre conteneur 
 frontend de l'architecture ci-dessus. Active CORS (CORSMiddleware) pour que ce frontend, servi sur
 un autre port (ex : http://localhost:8080), puisse appeler l'API.
 
-Inclus également, pour que n'importe qui puisse lancer le backend avec Docker :
-- un Dockerfile pour l'application FastAPI (image python slim, installation des
-  dependances, exposition du port 8000)
-- un docker-compose.yml avec deux services : "app" (le backend) et "db"
-  (postgres:16, avec un volume nomme pour persister les donnees et les
-  variables d'environnement POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB)
-- un fichier .env.example listant les variables necessaires (DATABASE_URL,
-  SECRET_KEY, etc.), coherentes avec docker-compose.yml
+Inclus également :
+- un fichier .env.example listant les variables necessaires (DATABASE_URL, SECRET_KEY, etc.)
+- un README.md qui documente comment lancer l'API : variables d'environnement, creation
+  ou migration du schema de la base, initialisation eventuelle (ex : compte admin) et
+  commande de demarrage (uvicorn sur le port 8000)
+
+Ne génère PAS de Dockerfile ni de docker-compose.yml : la configuration Docker de
+l'ensemble (backend, frontend, base PostgreSQL) est produite ensuite par un autre agent,
+a partir de ce README.md.
 
 Inclus des tests pytest dans {dossier_sortie}/tests/ (fichiers test_*.py) qui couvrent
 les endpoints de l'API avec fastapi.testclient.TestClient :
@@ -47,10 +48,6 @@ les endpoints de l'API avec fastapi.testclient.TestClient :
 - ils seront lances par `pytest {dossier_sortie}` avec {dossier_sortie} dans le PYTHONPATH :
   importe le code depuis la racine du backend (ex : `from app.main import app`)
 - ajoute pytest et httpx dans requirements.txt
-
-Le projet généré doit être autonome : sur une machine tierce, `docker compose up -d db`
-dans {dossier_sortie} doit suffire à démarrer une base de données compatible avec le
-DATABASE_URL par défaut du code, sans dépendre d'un conteneur externe préexistant.
 
 Écris les fichiers directement sur disque."""
 

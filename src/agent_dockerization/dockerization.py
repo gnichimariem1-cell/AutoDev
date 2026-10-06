@@ -26,6 +26,10 @@ generees et validees :
 - backend FastAPI dans {dossier_backend}
 - frontend statique (HTML/CSS/JS) dans {dossier_frontend}
 
+Commence par lire {dossier_backend}/README.md et {dossier_backend}/.env.example : ils
+indiquent comment demarrer le backend (migrations ou creation du schema, initialisation,
+commande uvicorn) et les variables d'environnement necessaires.
+
 Ecris DANS LE DOSSIER {dossier_sortie}/ (pas ailleurs, surtout pas a la racine du
 projet AutoDev qui a deja son propre docker-compose.yml) :
 - un Dockerfile pour le backend (image python slim, installe les dependances de

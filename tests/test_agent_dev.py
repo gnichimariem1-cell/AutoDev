@@ -17,3 +17,5 @@ def test_generer_code_appelle_claude_et_liste_fichiers(mock_run, tmp_path):
     prompt = mock_run.call_args.kwargs["input"]
     assert "UNIQUEMENT le backend" in prompt
     assert "CORSMiddleware" in prompt
+    assert "Ne génère PAS de Dockerfile ni de docker-compose.yml" in prompt
+    assert "README.md" in prompt

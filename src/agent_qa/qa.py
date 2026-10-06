@@ -21,10 +21,26 @@ def _env_sans_ros() -> dict:
 
 
 def lancer_tests(dossier_code: str) -> RapportQA:
+    env = _env_sans_ros()
+
+    requirements = os.path.join(dossier_code, "requirements.txt")
+    if os.path.exists(requirements):
+        resultat_install = subprocess.run(
+            ["pip", "install", "-r", requirements],
+            capture_output=True, text=True, env=env,
+        )
+        if resultat_install.returncode != 0:
+            raise RuntimeError(
+                "Echec de l'installation des dependances du backend genere "
+                f"({requirements}).\n"
+                f"stdout : {resultat_install.stdout[-2000:]}\n"
+                f"stderr : {resultat_install.stderr[-2000:]}"
+            )
+
     resultat = subprocess.run(
         ["pytest", dossier_code, "--cov", dossier_code,
          "--cov-report=json", "--json-report", "--json-report-file=rapport_pytest.json"],
-        capture_output=True, text=True, env=_env_sans_ros(),
+        capture_output=True, text=True, env=env,
     )
 
     if not os.path.exists("rapport_pytest.json"):

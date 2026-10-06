@@ -4,7 +4,8 @@ from src.agent_orchestrateur.orchestrateur import (
     executer_pipeline, executer_pipeline_en_direct, reprendre_pipeline_en_direct,
     point_de_reprise, RepriseImpossible,
 )
-from tests.sorties import BESOIN, SORTIE_DEV, QA_KO
+from src.common.schemas import RapportValidationDocker
+from tests.sorties import BESOIN, SORTIE_DEV, QA_KO, DOCKER_OK
 
 
 def _reprendre(id_run):
@@ -75,6 +76,24 @@ def test_pas_de_reprise_pour_un_echec_de_qa(agents):
     resultat = executer_pipeline(BESOIN)
     with pytest.raises(RepriseImpossible, match="sans plantage"):
         point_de_reprise(resultat["id_run"])
+
+
+def test_reprise_apres_echec_docker_du_a_la_machine(agents):
+    agents.valider_dockerisation.return_value = RapportValidationDocker(
+        docker_disponible=True, succes=False, erreur_environnement=True,
+        erreurs=["ports : port(s) deja occupe(s) sur la machine : 8000"],
+    )
+    resultat = executer_pipeline(BESOIN)
+    assert resultat["succes"] is False and resultat["etape"] == "docker"
+
+    # les ports sont liberes : on relance seulement la validation Docker
+    agents.valider_dockerisation.return_value = DOCKER_OK
+    evenements = _reprendre(resultat["id_run"])
+
+    assert evenements[0][0] == "validation_docker"
+    assert evenements[-1][1]["succes"] is True
+    agents.generer_dockerisation.assert_called_once()
+    agents.appliquer_corrections_dockerisation.assert_not_called()
 
 
 def test_pas_de_reprise_pour_un_run_inconnu():

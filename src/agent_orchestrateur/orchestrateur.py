@@ -137,6 +137,9 @@ def point_de_reprise(id_run: str):
       suivant n'a jamais termine) ;
     - agent qui a plante : la derniere sauvegarde AVANT le plantage (sans
       "erreur"), dont le noeud suivant est celui qui a plante.
+    - validation Docker en echec a cause de la machine (ex : port occupe) : la
+      derniere sauvegarde avant cette validation, pour la relancer une fois la
+      machine liberee.
     Leve RepriseImpossible si le run est inconnu ou s'est termine sans plantage
     (succes, ou echec de QA apres MAX_TENTATIVES : le relancer ne changerait rien)."""
     config = {"configurable": {"thread_id": id_run}}
@@ -145,6 +148,11 @@ def point_de_reprise(id_run: str):
         raise RepriseImpossible(f"Aucun run '{id_run}' dans les sauvegardes.")
     if derniere.next:
         return derniere
+    rapport_docker = derniere.values.get("rapport_validation_docker")
+    if rapport_docker and rapport_docker.erreur_environnement and not derniere.values.get("erreur"):
+        for sauvegarde in GRAPHE.get_state_history(config):
+            if sauvegarde.next == ("validation_docker",):
+                return sauvegarde
     if not derniere.values.get("erreur"):
         raise RepriseImpossible(f"Le run '{id_run}' s'est termine sans plantage : rien a reprendre.")
     for sauvegarde in GRAPHE.get_state_history(config):

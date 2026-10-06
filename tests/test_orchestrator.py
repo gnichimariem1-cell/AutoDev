@@ -1,8 +1,12 @@
 ﻿from unittest.mock import patch, MagicMock
 from src.agent_orchestrateur.orchestrateur import executer_pipeline
-from src.common.schemas import BesoinUtilisateur, RapportQA, RapportQAFrontend
+from src.common.schemas import BesoinUtilisateur, RapportQA, RapportQAFrontend, RapportValidationDocker
+
+DOCKER_OK = RapportValidationDocker(docker_disponible=True, succes=True)
 
 
+@patch("src.agent_orchestrateur.orchestrateur.valider_dockerisation", return_value=DOCKER_OK)
+@patch("src.agent_orchestrateur.orchestrateur.appliquer_corrections_dockerisation")
 @patch("src.agent_orchestrateur.orchestrateur.generer_dockerisation")
 @patch("src.agent_orchestrateur.orchestrateur.lancer_tests_frontend")
 @patch("src.agent_orchestrateur.orchestrateur.appliquer_corrections_frontend")
@@ -12,7 +16,7 @@ from src.common.schemas import BesoinUtilisateur, RapportQA, RapportQAFrontend
 @patch("src.agent_orchestrateur.orchestrateur.generer_code")
 @patch("src.agent_orchestrateur.orchestrateur.generer_architecture")
 @patch("src.agent_orchestrateur.orchestrateur.generer_user_stories")
-def test_pipeline_reussit_du_premier_coup(mock_po, mock_arch, mock_dev, mock_corr, mock_qa, mock_fe, mock_corr_fe, mock_qa_fe, mock_dock):
+def test_pipeline_reussit_du_premier_coup(mock_po, mock_arch, mock_dev, mock_corr, mock_qa, mock_fe, mock_corr_fe, mock_qa_fe, mock_dock, mock_corr_dock, mock_valid_dock):
     mock_dock.return_value = MagicMock()
     mock_arch.return_value = MagicMock()
     mock_po.return_value = MagicMock()
@@ -29,6 +33,8 @@ def test_pipeline_reussit_du_premier_coup(mock_po, mock_arch, mock_dev, mock_cor
     mock_corr_fe.assert_not_called()
 
 
+@patch("src.agent_orchestrateur.orchestrateur.valider_dockerisation", return_value=DOCKER_OK)
+@patch("src.agent_orchestrateur.orchestrateur.appliquer_corrections_dockerisation")
 @patch("src.agent_orchestrateur.orchestrateur.generer_dockerisation")
 @patch("src.agent_orchestrateur.orchestrateur.lancer_tests_frontend")
 @patch("src.agent_orchestrateur.orchestrateur.appliquer_corrections_frontend")
@@ -38,7 +44,7 @@ def test_pipeline_reussit_du_premier_coup(mock_po, mock_arch, mock_dev, mock_cor
 @patch("src.agent_orchestrateur.orchestrateur.generer_code")
 @patch("src.agent_orchestrateur.orchestrateur.generer_architecture")
 @patch("src.agent_orchestrateur.orchestrateur.generer_user_stories")
-def test_pipeline_echoue_apres_3_tentatives_backend(mock_po, mock_arch, mock_dev, mock_corr, mock_qa, mock_fe, mock_corr_fe, mock_qa_fe, mock_dock):
+def test_pipeline_echoue_apres_3_tentatives_backend(mock_po, mock_arch, mock_dev, mock_corr, mock_qa, mock_fe, mock_corr_fe, mock_qa_fe, mock_dock, mock_corr_dock, mock_valid_dock):
     mock_dock.return_value = MagicMock()
     mock_arch.return_value = MagicMock()
     mock_po.return_value = MagicMock()
@@ -54,6 +60,8 @@ def test_pipeline_echoue_apres_3_tentatives_backend(mock_po, mock_arch, mock_dev
     mock_fe.assert_not_called()
 
 
+@patch("src.agent_orchestrateur.orchestrateur.valider_dockerisation", return_value=DOCKER_OK)
+@patch("src.agent_orchestrateur.orchestrateur.appliquer_corrections_dockerisation")
 @patch("src.agent_orchestrateur.orchestrateur.generer_dockerisation")
 @patch("src.agent_orchestrateur.orchestrateur.lancer_tests_frontend")
 @patch("src.agent_orchestrateur.orchestrateur.appliquer_corrections_frontend")
@@ -63,7 +71,7 @@ def test_pipeline_echoue_apres_3_tentatives_backend(mock_po, mock_arch, mock_dev
 @patch("src.agent_orchestrateur.orchestrateur.generer_code")
 @patch("src.agent_orchestrateur.orchestrateur.generer_architecture")
 @patch("src.agent_orchestrateur.orchestrateur.generer_user_stories")
-def test_pipeline_echoue_apres_3_tentatives_frontend(mock_po, mock_arch, mock_dev, mock_corr, mock_qa, mock_fe, mock_corr_fe, mock_qa_fe, mock_dock):
+def test_pipeline_echoue_apres_3_tentatives_frontend(mock_po, mock_arch, mock_dev, mock_corr, mock_qa, mock_fe, mock_corr_fe, mock_qa_fe, mock_dock, mock_corr_dock, mock_valid_dock):
     mock_dock.return_value = MagicMock()
     mock_arch.return_value = MagicMock()
     mock_po.return_value = MagicMock()
@@ -80,3 +88,91 @@ def test_pipeline_echoue_apres_3_tentatives_frontend(mock_po, mock_arch, mock_de
     assert resultat["tentative_frontend"] == 3
     assert mock_corr_fe.call_count == 2
     mock_fe.assert_called_once()
+
+
+@patch("src.agent_orchestrateur.orchestrateur.valider_dockerisation")
+@patch("src.agent_orchestrateur.orchestrateur.appliquer_corrections_dockerisation")
+@patch("src.agent_orchestrateur.orchestrateur.generer_dockerisation")
+@patch("src.agent_orchestrateur.orchestrateur.lancer_tests_frontend")
+@patch("src.agent_orchestrateur.orchestrateur.appliquer_corrections_frontend")
+@patch("src.agent_orchestrateur.orchestrateur.generer_frontend")
+@patch("src.agent_orchestrateur.orchestrateur.lancer_tests")
+@patch("src.agent_orchestrateur.orchestrateur.appliquer_corrections")
+@patch("src.agent_orchestrateur.orchestrateur.generer_code")
+@patch("src.agent_orchestrateur.orchestrateur.generer_architecture")
+@patch("src.agent_orchestrateur.orchestrateur.generer_user_stories")
+def test_pipeline_echoue_apres_3_tentatives_docker(mock_po, mock_arch, mock_dev, mock_corr, mock_qa, mock_fe, mock_corr_fe, mock_qa_fe, mock_dock, mock_corr_dock, mock_valid_dock):
+    mock_dock.return_value = MagicMock()
+    mock_arch.return_value = MagicMock()
+    mock_po.return_value = MagicMock()
+    mock_qa.return_value = RapportQA(tests_passes=5, tests_echoues=0, couverture_pct=90, succes=True)
+    mock_qa_fe.return_value = RapportQAFrontend(fichiers_verifies=["index.html"], succes=True)
+    mock_valid_dock.return_value = RapportValidationDocker(
+        docker_disponible=True, succes=False, erreurs=["build : erreur"]
+    )
+
+    besoin = BesoinUtilisateur(titre_projet="x", description="y", utilisateurs_cibles="z", fonctionnalites_cles=["a"])
+    resultat = executer_pipeline(besoin)
+
+    assert resultat["succes"] is False
+    assert resultat["etape"] == "docker"
+    assert resultat["tentative_docker"] == 3
+    assert mock_corr_dock.call_count == 2
+
+
+@patch("src.agent_orchestrateur.orchestrateur.valider_dockerisation")
+@patch("src.agent_orchestrateur.orchestrateur.appliquer_corrections_dockerisation")
+@patch("src.agent_orchestrateur.orchestrateur.generer_dockerisation")
+@patch("src.agent_orchestrateur.orchestrateur.lancer_tests_frontend")
+@patch("src.agent_orchestrateur.orchestrateur.appliquer_corrections_frontend")
+@patch("src.agent_orchestrateur.orchestrateur.generer_frontend")
+@patch("src.agent_orchestrateur.orchestrateur.lancer_tests")
+@patch("src.agent_orchestrateur.orchestrateur.appliquer_corrections")
+@patch("src.agent_orchestrateur.orchestrateur.generer_code")
+@patch("src.agent_orchestrateur.orchestrateur.generer_architecture")
+@patch("src.agent_orchestrateur.orchestrateur.generer_user_stories")
+def test_pipeline_reussit_si_docker_non_joignable(mock_po, mock_arch, mock_dev, mock_corr, mock_qa, mock_fe, mock_corr_fe, mock_qa_fe, mock_dock, mock_corr_dock, mock_valid_dock):
+    mock_dock.return_value = MagicMock()
+    mock_arch.return_value = MagicMock()
+    mock_po.return_value = MagicMock()
+    mock_qa.return_value = RapportQA(tests_passes=5, tests_echoues=0, couverture_pct=90, succes=True)
+    mock_qa_fe.return_value = RapportQAFrontend(fichiers_verifies=["index.html"], succes=True)
+    mock_valid_dock.return_value = RapportValidationDocker(docker_disponible=False, succes=False)
+
+    besoin = BesoinUtilisateur(titre_projet="x", description="y", utilisateurs_cibles="z", fonctionnalites_cles=["a"])
+    resultat = executer_pipeline(besoin)
+
+    assert resultat["succes"] is True
+    assert resultat["rapport_validation_docker"].docker_disponible is False
+    mock_valid_dock.assert_called_once()
+    mock_corr_dock.assert_not_called()
+
+
+@patch("src.agent_orchestrateur.orchestrateur.valider_dockerisation")
+@patch("src.agent_orchestrateur.orchestrateur.appliquer_corrections_dockerisation")
+@patch("src.agent_orchestrateur.orchestrateur.generer_dockerisation")
+@patch("src.agent_orchestrateur.orchestrateur.lancer_tests_frontend")
+@patch("src.agent_orchestrateur.orchestrateur.appliquer_corrections_frontend")
+@patch("src.agent_orchestrateur.orchestrateur.generer_frontend")
+@patch("src.agent_orchestrateur.orchestrateur.lancer_tests")
+@patch("src.agent_orchestrateur.orchestrateur.appliquer_corrections")
+@patch("src.agent_orchestrateur.orchestrateur.generer_code")
+@patch("src.agent_orchestrateur.orchestrateur.generer_architecture")
+@patch("src.agent_orchestrateur.orchestrateur.generer_user_stories")
+def test_pipeline_ne_corrige_pas_une_erreur_environnement_docker(mock_po, mock_arch, mock_dev, mock_corr, mock_qa, mock_fe, mock_corr_fe, mock_qa_fe, mock_dock, mock_corr_dock, mock_valid_dock):
+    mock_dock.return_value = MagicMock()
+    mock_arch.return_value = MagicMock()
+    mock_po.return_value = MagicMock()
+    mock_qa.return_value = RapportQA(tests_passes=5, tests_echoues=0, couverture_pct=90, succes=True)
+    mock_qa_fe.return_value = RapportQAFrontend(fichiers_verifies=["index.html"], succes=True)
+    mock_valid_dock.return_value = RapportValidationDocker(
+        docker_disponible=True, succes=False, erreurs=["ports : 8000 occupe"], erreur_environnement=True
+    )
+
+    besoin = BesoinUtilisateur(titre_projet="x", description="y", utilisateurs_cibles="z", fonctionnalites_cles=["a"])
+    resultat = executer_pipeline(besoin)
+
+    assert resultat["succes"] is False
+    assert resultat["etape"] == "docker"
+    assert resultat["tentative_docker"] == 1
+    mock_corr_dock.assert_not_called()

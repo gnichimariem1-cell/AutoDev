@@ -101,6 +101,25 @@ def _section_dockerization(resultat) -> str:
     )
 
 
+def _section_validation_docker(resultat) -> str:
+    rapport = resultat.get("rapport_validation_docker")
+    if not rapport:
+        return "8. Docker Validation Agent\n   (non atteint)\n"
+    if not rapport.docker_disponible:
+        return "8. Docker Validation Agent — NON EFFECTUEE\n   Docker n'est pas joignable depuis le pipeline.\n"
+    statut = "OK" if rapport.succes else "ECHEC"
+    lignes = [f"   - {e.nom} : {'OK' if e.succes else 'ECHEC'}" for e in rapport.etapes]
+    texte = (
+        f"8. Docker Validation Agent — {statut} (tentative {resultat.get('tentative_docker', '?')})\n"
+        + "\n".join(lignes) + "\n"
+    )
+    if not rapport.succes:
+        if rapport.erreur_environnement:
+            texte += "   Probleme sur la machine (pas dans la configuration generee) :\n"
+        texte += "   Erreurs :\n" + "\n".join(f"     - {e}" for e in rapport.erreurs) + "\n"
+    return texte
+
+
 SECTIONS = {
     "Product Owner": _section_product_owner,
     "Architect": _section_architect,
@@ -109,6 +128,7 @@ SECTIONS = {
     "Frontend": _section_frontend,
     "QA Frontend": _section_qa_frontend,
     "Dockerization": _section_dockerization,
+    "Validation Docker": _section_validation_docker,
 }
 TOUTES_LES_SECTIONS = list(SECTIONS.keys())
 

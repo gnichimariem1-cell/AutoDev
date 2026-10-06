@@ -1,4 +1,4 @@
-.PHONY: test test-po test-dev test-frontend test-qa test-form run pipeline docker-build docker-up docker-down docker-logs
+.PHONY: test test-po test-dev test-frontend test-qa test-form test-orchestrator test-validation-docker run pipeline docker-build docker-up docker-down docker-logs
 
 test:
 	pytest --cov=src --cov-report=term-missing
@@ -15,6 +15,8 @@ test-qa:
 	pytest tests/test_agent_qa.py -v
 test-orchestrator:
 	pytest tests/test_orchestrator.py -v
+test-validation-docker:
+	pytest tests/test_agent_validation_docker.py -v
 
 run:
 	python -m src.agent_form.app

@@ -168,7 +168,7 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
             description = gr.Textbox(label="Description", lines=3, placeholder="Decris ton projet en quelques phrases")
             utilisateurs = gr.Textbox(label="Utilisateurs cibles", placeholder="Ex: Etudiants, particuliers...")
             fonctionnalites = gr.Textbox(label="Fonctionnalites cles (separees par virgules)", placeholder="login, creer tache, marquer terminee")
-            structure = gr.Textbox(label="Structure du projet", lines=2, placeholder="Ex: pages/sections souhaitees, organisation generale (optionnel)")
+            structure = gr.Textbox(label="Organisation de l'interface", lines=2, placeholder="Ex: pages/sections souhaitees, organisation generale (optionnel)")
             bouton_lancer = gr.Button("Lancer le pipeline", variant="primary")
 
         with gr.Column():

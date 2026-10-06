@@ -19,6 +19,10 @@ meme en cas de crash ou de fermeture du terminal.
 executer_pipeline_en_direct() renvoie l'etat apres chaque noeud (progression
 en direct dans la Vue) ; executer_pipeline() renvoie seulement l'etat final.
 
+Chaque nouveau run part d'un dossier de sortie vide : les fichiers du run
+precedent sont deplaces dans archives/<id du run precedent>/ (archiver_sorties).
+Une reprise, elle, garde le dossier tel quel.
+
 L'etat est sauvegarde apres chaque noeud (sauvegarde.py). Un run qui a plante
 peut etre repris avec reprendre_pipeline_en_direct(id_run) : il repart du noeud
 qui a plante, sans refaire les etapes deja reussies.
@@ -28,8 +32,10 @@ agent atteint (pas seulement les rapports QA), pour que la Vue affiche le
 detail agent par agent, meme en cas d'echec en cours de route.
 """
 import re
+import shutil
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 from src.common.schemas import BesoinUtilisateur
 from src.common.logging_config import configurer_logging
@@ -49,6 +55,34 @@ def nouvel_id_run(besoin: BesoinUtilisateur) -> str:
     """Ex : "todo-app-20261005-142530-3f9a" — lisible et unique."""
     slug = re.sub(r"[^a-z0-9]+", "-", besoin.titre_projet.lower()).strip("-")[:30] or "projet"
     return f"{slug}-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:4]}"
+
+
+DOSSIER_ARCHIVES = "archives"
+# Fichier ecrit dans le dossier de sortie pour savoir a quel run il appartient
+FICHIER_ID_RUN = ".id_run"
+
+
+def archiver_sorties(dossier: str, id_run: str) -> Path | None:
+    """Deplace le contenu de dossier (sorties du run precedent) dans
+    archives/<id du run precedent>/, puis recree dossier vide, marque avec id_run.
+    Sans cela, chaque run ecrit par-dessus les fichiers des precedents (ex : deux
+    migrations Alembic "0001" en conflit, anciens tests relances par le QA).
+    Retourne le dossier d'archive, ou None si dossier etait absent ou vide."""
+    sortie = Path(dossier)
+    archive = None
+    if sortie.is_dir() and any(sortie.iterdir()):
+        marqueur = sortie / FICHIER_ID_RUN
+        nom = (marqueur.read_text().strip() if marqueur.exists() else
+               f"{sortie.name}-{datetime.fromtimestamp(sortie.stat().st_mtime):%Y%m%d-%H%M%S}")
+        archive = Path(DOSSIER_ARCHIVES) / nom
+        if archive.exists():
+            archive = archive.with_name(f"{nom}-{uuid.uuid4().hex[:4]}")
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(sortie), str(archive))
+        logger.info("Sorties du run precedent archivees dans %s", archive)
+    sortie.mkdir(parents=True, exist_ok=True)
+    (sortie / FICHIER_ID_RUN).write_text(id_run)
+    return archive
 
 
 def _config(id_run: str) -> dict:
@@ -75,6 +109,8 @@ def executer_pipeline_en_direct(besoin: BesoinUtilisateur, dossier_backend="outp
     etat produit est l'etat final."""
     id_run = nouvel_id_run(besoin)
     logger.info("=== Nouveau run '%s' pour le projet '%s' ===", id_run, besoin.titre_projet)
+    # dossier_docker contient dossier_backend et dossier_frontend (par defaut)
+    archiver_sorties(dossier_docker, id_run)
 
     etat = {
         "id_run": id_run,
@@ -122,5 +158,12 @@ def reprendre_pipeline_en_direct(id_run: str):
     sortie que executer_pipeline_en_direct()."""
     sauvegarde = point_de_reprise(id_run)
     logger.info("=== Reprise du run '%s' a l'etape %s ===", id_run, ", ".join(sauvegarde.next))
+    marqueur = Path(sauvegarde.values["dossier_docker"]) / FICHIER_ID_RUN
+    if marqueur.exists() and marqueur.read_text().strip() != id_run:
+        logger.warning(
+            "Le dossier %s contient les sorties du run '%s', pas de '%s' : celles de '%s' "
+            "sont dans %s/%s/.", sauvegarde.values["dossier_docker"], marqueur.read_text().strip(),
+            id_run, id_run, DOSSIER_ARCHIVES, id_run,
+        )
     config = dict(sauvegarde.config, recursion_limit=LIMITE_RECURSION)
     yield from _suivre(None, config, dict(sauvegarde.values))

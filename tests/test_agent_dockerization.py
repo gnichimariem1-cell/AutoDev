@@ -1,7 +1,15 @@
 ﻿from unittest.mock import patch, MagicMock
 
+import pytest
+
 from src.agent_dockerization.dockerization import generer_dockerisation
 from src.common.schemas import SortieDockerization
+
+
+@pytest.fixture(autouse=True)
+def dossier_temporaire(tmp_path, monkeypatch):
+    """generer_dockerisation cree son dossier de sortie : pas dans output/ du projet."""
+    monkeypatch.chdir(tmp_path)
 
 
 @patch("src.agent_dockerization.dockerization.Path.glob")

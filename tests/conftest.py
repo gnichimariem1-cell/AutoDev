@@ -26,10 +26,13 @@ SORTIES_PAR_DEFAUT = {
 
 
 @pytest.fixture
-def agents():
+def agents(tmp_path, monkeypatch):
     """Remplace tous les agents appeles par le graphe par des mocks qui
     reussissent du premier coup ; chaque test modifie ceux qui l'interessent
-    (ex : agents.lancer_tests.return_value = QA_KO)."""
+    (ex : agents.lancer_tests.return_value = QA_KO).
+    Le test s'execute dans tmp_path : l'archivage des sorties en debut de run ne
+    touche ni output/ ni archives/ du projet."""
+    monkeypatch.chdir(tmp_path)
     with ExitStack() as pile:
         mocks = {
             nom: pile.enter_context(patch(f"src.agent_orchestrateur.noeuds.{nom}", return_value=sortie))

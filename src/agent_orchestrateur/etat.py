@@ -38,7 +38,10 @@ class EtatPipeline(TypedDict, total=False):
     tentative_frontend: int
     tentative_docker: int
 
-    # Resultat : succes, et en cas d'echec l'etape ou le pipeline s'est arrete
-    # ("backend", "frontend" ou "docker" — posee par le noeud QA en cours)
+    # Resultat : succes, et en cas d'echec l'etape ou le pipeline s'est arrete :
+    # - echec de QA apres MAX_TENTATIVES : "backend", "frontend" ou "docker"
+    # - plantage d'un agent (exception) : le nom du noeud, ex "developer",
+    #   et le message dans "erreur"
     succes: bool
     etape: str
+    erreur: str

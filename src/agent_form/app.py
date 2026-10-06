@@ -1,6 +1,6 @@
 ﻿import gradio as gr
 from src.common.schemas import BesoinUtilisateur
-from src.agent_orchestrateur.orchestrateur import executer_pipeline
+from src.agent_orchestrateur.orchestrateur import executer_pipeline_en_direct
 
 def collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure):
     besoin = BesoinUtilisateur(
@@ -132,6 +132,40 @@ SECTIONS = {
 }
 TOUTES_LES_SECTIONS = list(SECTIONS.keys())
 
+# Libelles des noeuds du graphe (src/agent_orchestrateur/graphe.py), pour
+# afficher la progression en direct et les plantages.
+LIBELLES_NOEUDS = {
+    "po": "Product Owner Agent",
+    "architect": "Architect Agent",
+    "developer": "Developer Agent",
+    "qa_backend": "QA Agent (backend)",
+    "correction_backend": "Correction du backend",
+    "frontend": "Frontend Agent",
+    "qa_frontend": "QA Agent (frontend)",
+    "correction_frontend": "Correction du frontend",
+    "dockerization": "Dockerization Agent",
+    "validation_docker": "Docker Validation Agent",
+    "correction_docker": "Correction de la config Docker",
+    "echec": "Arret du pipeline",
+}
+
+
+def _ligne_titre(resultat) -> str:
+    noeud_en_cours = resultat.get("_en_cours")
+    if noeud_en_cours and resultat.get("erreur"):
+        return f"⏳ ARRET EN COURS — plantage de : {LIBELLES_NOEUDS.get(noeud_en_cours, noeud_en_cours)}"
+    if noeud_en_cours:
+        return f"⏳ EN COURS — derniere etape terminee : {LIBELLES_NOEUDS.get(noeud_en_cours, noeud_en_cours)}"
+    if resultat["succes"]:
+        return "✅ SUCCES — pipeline complet"
+    etape = resultat.get("etape", "?")
+    if resultat.get("erreur"):
+        return (
+            f"❌ PLANTAGE a l'etape \"{LIBELLES_NOEUDS.get(etape, etape)}\"\n"
+            f"Erreur : {resultat['erreur']}"
+        )
+    return f"❌ ECHEC a l'etape \"{etape}\""
+
 
 def construire_rapport_detaille(resultat, sections_choisies=None) -> str:
     """Construit un rapport texte agent par agent. sections_choisies filtre
@@ -139,34 +173,50 @@ def construire_rapport_detaille(resultat, sections_choisies=None) -> str:
     utilisee au tout premier appel) ; une liste (meme vide) = respecter
     exactement ce qui est coche, y compris si l'utilisateur a tout decoche.
     Les etapes non atteintes (pipeline arrete avant) sont marquees comme
-    telles plutot que simplement omises.
+    telles plutot que simplement omises ; pendant un run (cle "_en_cours"),
+    elles sont marquees "(en attente)".
     """
     if sections_choisies is None:
         sections_choisies = TOUTES_LES_SECTIONS
 
-    ligne_titre = "✅ SUCCES — pipeline complet" if resultat["succes"] else f"❌ ECHEC a l'etape \"{resultat.get('etape', '?')}\""
-    corps = [ligne_titre, "=" * 50]
+    en_cours = bool(resultat.get("_en_cours"))
+    corps = [_ligne_titre(resultat), "=" * 50]
     for nom in TOUTES_LES_SECTIONS:
         if nom in sections_choisies:
-            corps.append(SECTIONS[nom](resultat))
+            section = SECTIONS[nom](resultat)
+            corps.append(section.replace("(non atteint)", "(en attente)") if en_cours else section)
 
     if not sections_choisies:
         corps.append("(Aucune section cochee — coche au moins une case ci-dessus pour voir le detail.)")
 
-    if resultat["succes"] and "Dockerization" in sections_choisies:
+    if resultat["succes"] and not en_cours and "Dockerization" in sections_choisies:
         corps.append("Code source genere dans : output/backend/ et output/frontend/\nConfig Docker generee dans : output/\n")
     return "\n".join(corps)
 
 
-def lancer_pipeline_complet(titre, description, utilisateurs, fonctionnalites, structure, sections_choisies):
-    besoin = collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure)
-    resultat = executer_pipeline(besoin)
-
+def _user_stories_json(resultat) -> str:
     user_stories = resultat.get("user_stories")
-    user_stories_json = user_stories.model_dump_json(indent=2) if user_stories else "{}"
+    return user_stories.model_dump_json(indent=2) if user_stories else "{}"
 
-    message = construire_rapport_detaille(resultat, sections_choisies)
-    return message, user_stories_json, resultat
+
+def lancer_pipeline_complet(titre, description, utilisateurs, fonctionnalites, structure, sections_choisies):
+    """Generateur : Gradio met a jour l'affichage a chaque `yield`, donc apres
+    chaque etape du pipeline. Le bouton est desactive pendant le run pour
+    eviter de lancer deux pipelines en parallele sur le meme dossier output/."""
+    besoin = collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure)
+    yield "⏳ Pipeline lance — Product Owner Agent en cours...", "{}", None, gr.update(interactive=False)
+
+    resultat = None
+    for noeud, etat in executer_pipeline_en_direct(besoin):
+        resultat = dict(etat, _en_cours=noeud)
+        if noeud == "echec":
+            continue  # le yield final ci-dessous affiche directement l'echec
+        yield (construire_rapport_detaille(resultat, sections_choisies), _user_stories_json(resultat),
+               resultat, gr.update(interactive=False))
+
+    resultat.pop("_en_cours")
+    yield (construire_rapport_detaille(resultat, sections_choisies), _user_stories_json(resultat),
+           resultat, gr.update(interactive=True))
 
 
 def rafraichir_affichage(sections_choisies, resultat):
@@ -205,7 +255,7 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
     bouton_lancer.click(
         fn=lancer_pipeline_complet,
         inputs=[titre, description, utilisateurs, fonctionnalites, structure, sections_choisies],
-        outputs=[resultat_texte, user_stories_json, resultat_state],
+        outputs=[resultat_texte, user_stories_json, resultat_state, bouton_lancer],
     )
     sections_choisies.change(
         fn=rafraichir_affichage,

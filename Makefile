@@ -1,4 +1,4 @@
-.PHONY: test test-po test-dev test-frontend test-qa test-form test-orchestrator test-validation-docker run pipeline docker-build docker-up docker-down docker-logs
+.PHONY: test test-po test-dev test-frontend test-qa test-form test-orchestrator test-validation-docker test-graphe graphe run pipeline docker-build docker-up docker-down docker-logs
 
 test:
 	pytest --cov=src --cov-report=term-missing
@@ -17,6 +17,11 @@ test-orchestrator:
 	pytest tests/test_orchestrator.py -v
 test-validation-docker:
 	pytest tests/test_agent_validation_docker.py -v
+test-graphe:
+	pytest tests/test_graphe.py -v
+
+graphe:
+	python -m src.agent_orchestrateur.graphe
 
 run:
 	python -m src.agent_form.app

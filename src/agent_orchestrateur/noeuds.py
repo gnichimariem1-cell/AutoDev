@@ -4,7 +4,14 @@ correction par boucle et un noeud d'echec final.
 Chaque noeud appelle l'agent existant (aucun agent n'est modifie) et renvoie
 uniquement les cles de l'etat qu'il met a jour. Les decisions (continuer,
 corriger, abandonner) ne sont PAS prises ici mais dans routage.py.
+
+Chaque noeud d'agent est protege par @_proteger : si l'agent leve une exception
+(Ollama injoignable, credit Claude epuise, timeout...), le pipeline ne plante
+pas ; l'erreur est placee dans l'etat et le routage envoie vers le noeud echec,
+pour que la Vue affiche quand meme le rapport detaille.
 """
+import functools
+
 from src.common.logging_config import configurer_logging
 from src.agent_po.product_owner import generer_user_stories
 from src.agent_architect.architect import generer_architecture
@@ -18,6 +25,20 @@ from src.agent_orchestrateur.etat import EtatPipeline, MAX_TENTATIVES
 logger = configurer_logging()
 
 
+def _proteger(nom_noeud: str):
+    def decorateur(noeud):
+        @functools.wraps(noeud)
+        def noeud_protege(etat: EtatPipeline) -> dict:
+            try:
+                return noeud(etat)
+            except Exception as e:
+                logger.exception("Plantage du noeud %s", nom_noeud)
+                return {"etape": nom_noeud, "erreur": f"{type(e).__name__} : {e}"}
+        return noeud_protege
+    return decorateur
+
+
+@_proteger("po")
 def noeud_po(etat: EtatPipeline) -> dict:
     logger.info("[1/8] Product Owner Agent : demarrage")
     user_stories = generer_user_stories(etat["besoin"])
@@ -25,6 +46,7 @@ def noeud_po(etat: EtatPipeline) -> dict:
     return {"user_stories": user_stories}
 
 
+@_proteger("architect")
 def noeud_architect(etat: EtatPipeline) -> dict:
     logger.info("[2/8] Architect Agent : demarrage")
     architecture = generer_architecture(etat["user_stories"])
@@ -32,6 +54,7 @@ def noeud_architect(etat: EtatPipeline) -> dict:
     return {"architecture": architecture}
 
 
+@_proteger("developer")
 def noeud_developer(etat: EtatPipeline) -> dict:
     logger.info("[3/8] Developer Agent : demarrage")
     sortie_dev = generer_code(etat["user_stories"], etat["dossier_backend"], architecture=etat["architecture"])
@@ -39,6 +62,7 @@ def noeud_developer(etat: EtatPipeline) -> dict:
     return {"sortie_dev": sortie_dev}
 
 
+@_proteger("qa_backend")
 def noeud_qa_backend(etat: EtatPipeline) -> dict:
     tentative = etat.get("tentative_backend", 0) + 1
     logger.info("[4/8] QA Agent backend : tentative %d/%d", tentative, MAX_TENTATIVES)
@@ -49,6 +73,7 @@ def noeud_qa_backend(etat: EtatPipeline) -> dict:
     return {"rapport_backend": rapport, "tentative_backend": tentative, "etape": "backend"}
 
 
+@_proteger("correction_backend")
 def noeud_correction_backend(etat: EtatPipeline) -> dict:
     rapport = etat["rapport_backend"]
     logger.warning("[4/8] QA Agent backend : echec tentative %d — correction en cours — %s",
@@ -56,6 +81,7 @@ def noeud_correction_backend(etat: EtatPipeline) -> dict:
     return {"sortie_dev": appliquer_corrections(rapport.erreurs, etat["dossier_backend"])}
 
 
+@_proteger("frontend")
 def noeud_frontend(etat: EtatPipeline) -> dict:
     logger.info("[5/8] Frontend Agent : demarrage")
     sortie_frontend = generer_frontend(etat["user_stories"], etat["dossier_backend"], etat["dossier_frontend"])
@@ -63,6 +89,7 @@ def noeud_frontend(etat: EtatPipeline) -> dict:
     return {"sortie_frontend": sortie_frontend}
 
 
+@_proteger("qa_frontend")
 def noeud_qa_frontend(etat: EtatPipeline) -> dict:
     tentative = etat.get("tentative_frontend", 0) + 1
     logger.info("[6/8] QA Agent frontend : tentative %d/%d", tentative, MAX_TENTATIVES)
@@ -72,6 +99,7 @@ def noeud_qa_frontend(etat: EtatPipeline) -> dict:
     return {"rapport_frontend": rapport, "tentative_frontend": tentative, "etape": "frontend"}
 
 
+@_proteger("correction_frontend")
 def noeud_correction_frontend(etat: EtatPipeline) -> dict:
     rapport = etat["rapport_frontend"]
     logger.warning("[6/8] QA Agent frontend : echec tentative %d — correction en cours — %s",
@@ -79,6 +107,7 @@ def noeud_correction_frontend(etat: EtatPipeline) -> dict:
     return {"sortie_frontend": appliquer_corrections_frontend(rapport.erreurs, etat["dossier_frontend"])}
 
 
+@_proteger("dockerization")
 def noeud_dockerization(etat: EtatPipeline) -> dict:
     logger.info("[7/8] Dockerization Agent : demarrage")
     rapport = generer_dockerisation(etat["dossier_backend"], etat["dossier_frontend"], etat["dossier_docker"])
@@ -86,6 +115,7 @@ def noeud_dockerization(etat: EtatPipeline) -> dict:
     return {"rapport_dockerisation": rapport}
 
 
+@_proteger("validation_docker")
 def noeud_validation_docker(etat: EtatPipeline) -> dict:
     tentative = etat.get("tentative_docker", 0) + 1
     logger.info("[8/8] Docker Validation Agent : tentative %d/%d", tentative, MAX_TENTATIVES)
@@ -97,6 +127,7 @@ def noeud_validation_docker(etat: EtatPipeline) -> dict:
     return {"rapport_validation_docker": rapport, "tentative_docker": tentative, "etape": "docker"}
 
 
+@_proteger("correction_docker")
 def noeud_correction_docker(etat: EtatPipeline) -> dict:
     rapport = etat["rapport_validation_docker"]
     logger.warning("[8/8] Docker Validation Agent : echec tentative %d — correction en cours — %s",
@@ -114,8 +145,11 @@ _RAPPORTS_PAR_ETAPE = {
 
 def noeud_echec(etat: EtatPipeline) -> dict:
     etape = etat["etape"]
-    cle_rapport, cle_tentative = _RAPPORTS_PAR_ETAPE[etape]
-    logger.error("ECHEC definitif a l'etape %s (tentative %d/%d) — %s",
-                 etape, etat[cle_tentative], MAX_TENTATIVES, etat[cle_rapport].erreurs)
+    if etat.get("erreur"):
+        logger.error("PLANTAGE de l'etape %s — %s", etape, etat["erreur"])
+    else:
+        cle_rapport, cle_tentative = _RAPPORTS_PAR_ETAPE[etape]
+        logger.error("ECHEC definitif a l'etape %s (tentative %d/%d) — %s",
+                     etape, etat[cle_tentative], MAX_TENTATIVES, etat[cle_rapport].erreurs)
     logger.info("=== Run termine en ECHEC (etape %s) pour '%s' ===", etape, etat["besoin"].titre_projet)
     return {"succes": False}

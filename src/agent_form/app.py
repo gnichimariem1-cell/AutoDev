@@ -1,4 +1,7 @@
-﻿import gradio as gr
+﻿import threading
+import time
+
+import gradio as gr
 from src.common.schemas import BesoinUtilisateur
 from src.agent_orchestrateur.orchestrateur import (
     executer_pipeline_en_direct, reprendre_pipeline_en_direct, point_de_reprise, RepriseImpossible,
@@ -207,18 +210,112 @@ def _boutons(actifs: bool):
     return gr.update(interactive=actifs), gr.update(interactive=actifs)
 
 
-def _suivre_dans_la_vue(evenements, sections_choisies, id_run_affiche=""):
-    """Generateur : Gradio met a jour l'affichage a chaque `yield`, donc apres
-    chaque etape du pipeline. Sorties : rapport, User Stories JSON, etat,
-    bouton Lancer, bouton Reprendre, ID du run."""
-    resultat = None
-    for noeud, etat in evenements:
-        resultat = dict(etat, _en_cours=noeud)
-        if noeud == "echec":
-            continue  # le yield final ci-dessous affiche directement l'echec
-        yield (construire_rapport_detaille(resultat, sections_choisies), _user_stories_json(resultat),
-               resultat, *_boutons(False), resultat["id_run"])
+# Pendant une etape longue (ex : Developer Agent, ~10 min), la page est
+# rafraichie a cet intervalle (en secondes) avec le temps ecoule.
+INTERVALLE_RAFRAICHISSEMENT = 5
 
+
+class RunEnArrierePlan:
+    """Execute un run du pipeline dans un thread, independamment de la page.
+
+    Avant, le pipeline avancait seulement quand Gradio demandait la suite a la
+    page : si la page perdait sa connexion pendant une etape longue, le run
+    restait fige apres cette etape. Ici le thread va jusqu'au bout quoi qu'il
+    arrive cote navigateur ; la page ne fait que suivre les evenements, et peut
+    s'y rattacher apres un rechargement (suivre_run_actif)."""
+
+    def __init__(self, evenements, id_run=""):
+        self.id_run = id_run
+        self.evenements = []  # (noeud termine, etat) dans l'ordre
+        self.termine = False
+        self.exception = None
+        self._condition = threading.Condition()
+        threading.Thread(target=self._executer, args=(evenements,), daemon=True).start()
+
+    def _executer(self, evenements):
+        try:
+            for noeud, etat in evenements:
+                with self._condition:
+                    self.id_run = etat.get("id_run", self.id_run)
+                    self.evenements.append((noeud, dict(etat)))
+                    self._condition.notify_all()
+        except Exception as e:
+            self.exception = e
+        finally:
+            with self._condition:
+                self.termine = True
+                self._condition.notify_all()
+
+    def attendre(self, deja_vus: int, timeout: float):
+        """Attend (au plus timeout s) un evenement au-dela des deja_vus premiers,
+        ou la fin du run. Renvoie (nouveaux evenements, run termine)."""
+        with self._condition:
+            self._condition.wait_for(lambda: len(self.evenements) > deja_vus or self.termine, timeout)
+            return self.evenements[deja_vus:], self.termine
+
+
+# Dernier run lance depuis cette application (en cours ou termine)
+_run_actif: RunEnArrierePlan | None = None
+_verrou_run = threading.Lock()
+
+
+def _demarrer_run(evenements, id_run="") -> RunEnArrierePlan | None:
+    """Demarre un run en arriere-plan, sauf si un autre est encore en cours
+    (deux runs en parallele ecriraient dans le meme dossier output/)."""
+    global _run_actif
+    with _verrou_run:
+        if _run_actif and not _run_actif.termine:
+            return None
+        _run_actif = RunEnArrierePlan(evenements, id_run)
+        return _run_actif
+
+
+def _message_run_deja_en_cours():
+    id_run = _run_actif.id_run or "(en cours de demarrage)"
+    return (f"⚠️ Un run est deja en cours (ID : {id_run}). Attends sa fin ou recharge la page "
+            "pour suivre sa progression (detail aussi dans logs/pipeline.log).",
+            gr.update(), gr.update(), *_boutons(False), id_run)
+
+
+def _duree(secondes: float) -> str:
+    minutes, secondes = divmod(int(secondes), 60)
+    return f"{minutes} min {secondes:02d} s" if minutes else f"{secondes} s"
+
+
+def _suivre_dans_la_vue(run: RunEnArrierePlan, sections_choisies, sortie_initiale):
+    """Generateur : Gradio met a jour l'affichage a chaque `yield`, donc apres
+    chaque etape du pipeline, et toutes les INTERVALLE_RAFRAICHISSEMENT s
+    pendant une etape longue. Sorties : rapport, User Stories JSON, etat,
+    bouton Lancer, bouton Reprendre, ID du run.
+    Si la page se deconnecte, seul ce suivi s'arrete : le run continue."""
+    derniere_sortie = sortie_initiale
+    yield derniere_sortie
+    resultat = None
+    vus = 0
+    debut_etape = time.monotonic()
+    while True:
+        nouveaux, termine = run.attendre(vus, INTERVALLE_RAFRAICHISSEMENT)
+        vus += len(nouveaux)
+        for noeud, etat in nouveaux:
+            resultat = dict(etat, _en_cours=noeud)
+            debut_etape = time.monotonic()
+            if noeud == "echec":
+                continue  # le yield final ci-dessous affiche directement l'echec
+            derniere_sortie = (construire_rapport_detaille(resultat, sections_choisies),
+                               _user_stories_json(resultat), resultat, *_boutons(False), resultat["id_run"])
+            yield derniere_sortie
+        if termine:
+            break
+        if not nouveaux:
+            texte = f"{derniere_sortie[0]}\n\n⏱ Etape suivante en cours depuis {_duree(time.monotonic() - debut_etape)}"
+            yield (texte, *derniere_sortie[1:])
+
+    if run.exception:
+        raise run.exception
+    if resultat is None:
+        yield ("❌ Le run s'est arrete sans produire de resultat (voir logs/pipeline.log).",
+               gr.update(), gr.update(), *_boutons(True), run.id_run)
+        return
     resultat.pop("_en_cours")
     yield (construire_rapport_detaille(resultat, sections_choisies), _user_stories_json(resultat),
            resultat, *_boutons(True), resultat["id_run"])
@@ -226,8 +323,14 @@ def _suivre_dans_la_vue(evenements, sections_choisies, id_run_affiche=""):
 
 def lancer_pipeline_complet(titre, description, utilisateurs, fonctionnalites, structure, sections_choisies):
     besoin = collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure)
-    yield "⏳ Pipeline lance — Product Owner Agent en cours...", "{}", None, *_boutons(False), ""
-    yield from _suivre_dans_la_vue(executer_pipeline_en_direct(besoin), sections_choisies)
+    run = _demarrer_run(executer_pipeline_en_direct(besoin))
+    if run is None:
+        yield _message_run_deja_en_cours()
+        return
+    yield from _suivre_dans_la_vue(
+        run, sections_choisies,
+        ("⏳ Pipeline lance — Product Owner Agent en cours...", "{}", None, *_boutons(False), ""),
+    )
 
 
 def reprendre_pipeline(id_run, sections_choisies):
@@ -240,8 +343,28 @@ def reprendre_pipeline(id_run, sections_choisies):
     except RepriseImpossible as e:
         yield f"⚠️ Reprise impossible : {e}", gr.update(), gr.update(), *_boutons(True), id_run
         return
-    yield f"⏳ Reprise du run {id_run} a l'etape {etape}...", gr.update(), gr.update(), *_boutons(False), id_run
-    yield from _suivre_dans_la_vue(reprendre_pipeline_en_direct(id_run), sections_choisies)
+    run = _demarrer_run(reprendre_pipeline_en_direct(id_run), id_run)
+    if run is None:
+        yield _message_run_deja_en_cours()
+        return
+    yield from _suivre_dans_la_vue(
+        run, sections_choisies,
+        (f"⏳ Reprise du run {id_run} a l'etape {etape}...", gr.update(), gr.update(), *_boutons(False), id_run),
+    )
+
+
+def suivre_run_actif(sections_choisies):
+    """A l'ouverture (ou au rechargement) de la page : se rattache au run en
+    cours, ou affiche le resultat du dernier run, avec son ID pre-rempli."""
+    run = _run_actif
+    if run is None:
+        yield gr.update(), gr.update(), gr.update(), *_boutons(True), gr.update()
+        return
+    yield from _suivre_dans_la_vue(
+        run, sections_choisies,
+        (f"⏳ Reconnexion au run {run.id_run or '(en cours de demarrage)'}...",
+         gr.update(), gr.update(), *_boutons(run.termine), run.id_run),
+    )
 
 
 def rafraichir_affichage(sections_choisies, resultat):
@@ -287,15 +410,26 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
     resultat_state = gr.State(None)
     sorties_run = [resultat_texte, user_stories_json, resultat_state, bouton_lancer, bouton_reprendre, id_run]
 
+    # concurrency_limit=None : ces fonctions ne font que suivre un run qui tourne
+    # dans son propre thread ; un suivi abandonne (page deconnectee) ne doit pas
+    # bloquer les suivants. _demarrer_run empeche deux runs en parallele.
     bouton_lancer.click(
         fn=lancer_pipeline_complet,
         inputs=[titre, description, utilisateurs, fonctionnalites, structure, sections_choisies],
         outputs=sorties_run,
+        concurrency_limit=None,
     )
     bouton_reprendre.click(
         fn=reprendre_pipeline,
         inputs=[id_run, sections_choisies],
         outputs=sorties_run,
+        concurrency_limit=None,
+    )
+    demo.load(
+        fn=suivre_run_actif,
+        inputs=[sections_choisies],
+        outputs=sorties_run,
+        concurrency_limit=None,
     )
     sections_choisies.change(
         fn=rafraichir_affichage,

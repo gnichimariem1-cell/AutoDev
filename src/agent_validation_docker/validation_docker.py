@@ -10,6 +10,10 @@ Dockerization Agent fonctionne reellement, sans IA (verifications deterministes)
 5. les services "app" (backend) et "frontend" repondent en HTTP
 6. `docker compose down -v` : nettoyage systematique, meme en cas d'echec
 
+Si Docker dispose du runtime nvidia (NVIDIA Container Toolkit), tous les
+services recoivent l'acces au GPU (equivalent Compose de `--gpus all`) via un
+fichier override temporaire : le docker-compose.yml genere n'est pas modifie.
+
 Les erreurs (avec les logs des conteneurs) sont renvoyees a l'orchestrateur,
 qui les transmet au Dockerization Agent pour correction (boucle de correction).
 
@@ -21,6 +25,7 @@ import os
 import shutil
 import socket
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -36,6 +41,8 @@ DEMARRAGE_TIMEOUT = int(os.environ.get("DOCKER_DEMARRAGE_TIMEOUT", 120))
 # Hote ou joindre les ports publies : "localhost" en local, "host.docker.internal"
 # si le pipeline tourne lui-meme dans un conteneur.
 HOTE_VALIDATION = os.environ.get("DOCKER_VALIDATION_HOST", "localhost")
+# Acces GPU des conteneurs : "auto" (si le runtime nvidia est installe), "1" ou "0".
+DOCKER_GPUS = os.environ.get("DOCKER_GPUS", "auto")
 
 
 def _commande_compose() -> list[str] | None:
@@ -49,6 +56,30 @@ def _commande_compose() -> list[str] | None:
             return [docker_bin, "compose"]
     compose_bin = shutil.which("docker-compose")
     return [compose_bin] if compose_bin else None
+
+
+def _gpu_disponible() -> bool:
+    if DOCKER_GPUS in ("0", "1"):
+        return DOCKER_GPUS == "1"
+    docker_bin = shutil.which("docker")
+    if not docker_bin:
+        return False
+    resultat = subprocess.run(
+        [docker_bin, "info", "--format", "{{json .Runtimes}}"], capture_output=True, text=True,
+    )
+    return resultat.returncode == 0 and "nvidia" in resultat.stdout
+
+
+def _override_gpu(services: list[str]) -> str:
+    """Ecrit un fichier override Compose donnant tous les GPU a chaque service
+    (equivalent de `docker run --gpus all`) et retourne son chemin."""
+    gpu = {"deploy": {"resources": {"reservations": {"devices": [
+        {"driver": "nvidia", "count": "all", "capabilities": ["gpu"]},
+    ]}}}}
+    descripteur, chemin = tempfile.mkstemp(prefix="autodev-gpu-", suffix=".json")
+    with os.fdopen(descripteur, "w") as f:
+        json.dump({"services": {service: gpu for service in services}}, f)
+    return chemin
 
 
 def _executer(compose: list[str], args: list[str], dossier: str, timeout: int) -> subprocess.CompletedProcess:
@@ -136,6 +167,11 @@ def valider_dockerisation(dossier: str = "output") -> RapportValidationDocker:
         )
     etapes.append(EtapeValidationDocker(nom="ports", succes=True))
 
+    override_gpu = None
+    if _gpu_disponible():
+        override_gpu = _override_gpu(list(config.get("services", {})))
+        compose = compose + ["-f", "docker-compose.yml", "-f", override_gpu]
+
     try:
         resultat = _executer(compose, ["build"], dossier, BUILD_TIMEOUT)
         if resultat.returncode != 0:
@@ -161,5 +197,7 @@ def valider_dockerisation(dossier: str = "output") -> RapportValidationDocker:
         return echec("timeout", f"commande trop longue : {' '.join(e.cmd)}")
     finally:
         _executer(compose, ["down", "-v", "--remove-orphans"], dossier, 120)
+        if override_gpu:
+            os.unlink(override_gpu)
 
     return RapportValidationDocker(docker_disponible=True, etapes=etapes, succes=True)

@@ -1,4 +1,4 @@
-﻿"""Agent Orchestrateur — role de Controleur dans l'organisation MVC du projet.
+"""Agent Orchestrateur — role de Controleur dans l'organisation MVC du projet.
 
 Ce module ne produit aucun livrable lui-meme : il coordonne les agents du
 Modele (Product Owner, Architect, Developer, QA backend, Frontend, QA frontend,
@@ -6,139 +6,43 @@ Dockerization, Docker Validation) dans le bon ordre, gere les boucles de
 correction (backend, frontend puis Docker), et renvoie le resultat final a la
 Vue (src/agent_form/app.py).
 
+La coordination est un graphe LangGraph, decoupe en :
+- etat.py    : l'etat partage entre les noeuds (EtatPipeline)
+- noeuds.py  : un noeud par agent + noeuds de correction + noeud d'echec
+- routage.py : les decisions apres chaque QA (ok / corriger / abandon)
+- graphe.py  : l'assemblage des noeuds et des aretes
+
 Chaque etape est journalisee (src/common/logging_config.py) en console ET
 dans logs/pipeline.log, pour retrouver precisement ou un run s'est arrete
 meme en cas de crash ou de fermeture du terminal.
 
-Le dictionnaire retourne contient aussi la sortie de CHAQUE agent (pas
-seulement les rapports QA), pour que la Vue affiche le detail agent par
-agent, meme en cas d'echec en cours de route.
+Le dictionnaire retourne (l'etat final du graphe) contient la sortie de CHAQUE
+agent atteint (pas seulement les rapports QA), pour que la Vue affiche le
+detail agent par agent, meme en cas d'echec en cours de route.
 """
-import os
-
 from src.common.schemas import BesoinUtilisateur
 from src.common.logging_config import configurer_logging
-from src.agent_po.product_owner import generer_user_stories
-from src.agent_architect.architect import generer_architecture
-from src.agent_dev.developer import generer_code, appliquer_corrections
-from src.agent_frontend.frontend import generer_frontend, appliquer_corrections_frontend
-from src.agent_qa.qa import lancer_tests, lancer_tests_frontend
-from src.agent_dockerization.dockerization import generer_dockerisation, appliquer_corrections_dockerisation
-from src.agent_validation_docker.validation_docker import valider_dockerisation
-
-MAX_TENTATIVES = int(os.environ.get("MAX_TENTATIVES", 3))
+from src.agent_orchestrateur.graphe import construire_graphe, LIMITE_RECURSION
 
 logger = configurer_logging()
+
+GRAPHE = construire_graphe()
 
 
 def executer_pipeline(besoin: BesoinUtilisateur, dossier_backend="output/backend", dossier_frontend="output/frontend", dossier_docker="output"):
     logger.info("=== Nouveau run pour le projet '%s' ===", besoin.titre_projet)
 
-    logger.info("[1/8] Product Owner Agent : demarrage")
-    user_stories = generer_user_stories(besoin)
-    logger.info("[1/8] Product Owner Agent : OK (%d User Stories)", len(user_stories.user_stories))
+    etat_final = GRAPHE.invoke(
+        {
+            "besoin": besoin,
+            "dossier_backend": dossier_backend,
+            "dossier_frontend": dossier_frontend,
+            "dossier_docker": dossier_docker,
+            "succes": True,
+        },
+        config={"recursion_limit": LIMITE_RECURSION},
+    )
 
-    logger.info("[2/8] Architect Agent : demarrage")
-    architecture = generer_architecture(user_stories)
-    logger.info("[2/8] Architect Agent : OK (stack : %s)", ", ".join(architecture.stack_technique))
-
-    logger.info("[3/8] Developer Agent : demarrage")
-    sortie_dev = generer_code(user_stories, dossier_backend, architecture=architecture)
-    logger.info("[3/8] Developer Agent : OK (%d fichiers generes)", len(sortie_dev.fichiers_generes))
-
-    rapport_backend = None
-    for tentative_backend in range(1, MAX_TENTATIVES + 1):
-        logger.info("[4/8] QA Agent backend : tentative %d/%d", tentative_backend, MAX_TENTATIVES)
-        rapport_backend = lancer_tests(dossier_backend)
-        if rapport_backend.succes:
-            logger.info("[4/8] QA Agent backend : OK (%d tests passes, couverture %.1f%%)",
-                        rapport_backend.tests_passes, rapport_backend.couverture_pct)
-            break
-        if tentative_backend == MAX_TENTATIVES:
-            logger.error("[4/8] QA Agent backend : ECHEC definitif apres %d tentatives — %s",
-                         MAX_TENTATIVES, rapport_backend.erreurs)
-            return {
-                "succes": False,
-                "etape": "backend",
-                "user_stories": user_stories,
-                "architecture": architecture,
-                "sortie_dev": sortie_dev,
-                "rapport_backend": rapport_backend,
-                "tentative_backend": tentative_backend,
-            }
-        logger.warning("[4/8] QA Agent backend : echec tentative %d — correction en cours — %s",
-                       tentative_backend, rapport_backend.erreurs)
-        sortie_dev = appliquer_corrections(rapport_backend.erreurs, dossier_backend)
-
-    logger.info("[5/8] Frontend Agent : demarrage")
-    sortie_frontend = generer_frontend(user_stories, dossier_backend, dossier_frontend)
-    logger.info("[5/8] Frontend Agent : OK (%d fichiers generes)", len(sortie_frontend.fichiers_generes))
-
-    rapport_frontend = None
-    for tentative_frontend in range(1, MAX_TENTATIVES + 1):
-        logger.info("[6/8] QA Agent frontend : tentative %d/%d", tentative_frontend, MAX_TENTATIVES)
-        rapport_frontend = lancer_tests_frontend(dossier_frontend)
-        if rapport_frontend.succes:
-            logger.info("[6/8] QA Agent frontend : OK (%d fichiers verifies)", len(rapport_frontend.fichiers_verifies))
-            break
-        if tentative_frontend == MAX_TENTATIVES:
-            logger.error("[6/8] QA Agent frontend : ECHEC definitif apres %d tentatives — %s",
-                         MAX_TENTATIVES, rapport_frontend.erreurs)
-            logger.info("=== Run termine en ECHEC (etape frontend) pour '%s' ===", besoin.titre_projet)
-            return {
-                "succes": False,
-                "etape": "frontend",
-                "user_stories": user_stories,
-                "architecture": architecture,
-                "sortie_dev": sortie_dev,
-                "rapport_backend": rapport_backend,
-                "sortie_frontend": sortie_frontend,
-                "rapport_frontend": rapport_frontend,
-                "tentative_backend": tentative_backend,
-                "tentative_frontend": tentative_frontend,
-            }
-        logger.warning("[6/8] QA Agent frontend : echec tentative %d — correction en cours — %s",
-                       tentative_frontend, rapport_frontend.erreurs)
-        sortie_frontend = appliquer_corrections_frontend(rapport_frontend.erreurs, dossier_frontend)
-
-    logger.info("[7/8] Dockerization Agent : demarrage")
-    rapport_dockerisation = generer_dockerisation(dossier_backend, dossier_frontend, dossier_docker)
-    logger.info("[7/8] Dockerization Agent : OK (%d fichiers generes)", len(rapport_dockerisation.fichiers_generes))
-
-    resultat = {
-        "succes": True,
-        "user_stories": user_stories,
-        "architecture": architecture,
-        "sortie_dev": sortie_dev,
-        "rapport_backend": rapport_backend,
-        "sortie_frontend": sortie_frontend,
-        "rapport_frontend": rapport_frontend,
-        "rapport_dockerisation": rapport_dockerisation,
-        "tentative_backend": tentative_backend,
-        "tentative_frontend": tentative_frontend,
-    }
-
-    for tentative_docker in range(1, MAX_TENTATIVES + 1):
-        logger.info("[8/8] Docker Validation Agent : tentative %d/%d", tentative_docker, MAX_TENTATIVES)
-        rapport_validation = valider_dockerisation(dossier_docker)
-        resultat["rapport_validation_docker"] = rapport_validation
-        resultat["tentative_docker"] = tentative_docker
-        if not rapport_validation.docker_disponible:
-            logger.warning("[8/8] Docker Validation Agent : Docker non joignable, validation ignoree")
-            break
-        if rapport_validation.succes:
-            logger.info("[8/8] Docker Validation Agent : OK (build, demarrage et services verifies)")
-            break
-        if rapport_validation.erreur_environnement or tentative_docker == MAX_TENTATIVES:
-            logger.error("[8/8] Docker Validation Agent : ECHEC definitif (tentative %d/%d) — %s",
-                         tentative_docker, MAX_TENTATIVES, rapport_validation.erreurs)
-            logger.info("=== Run termine en ECHEC (etape docker) pour '%s' ===", besoin.titre_projet)
-            resultat["succes"] = False
-            resultat["etape"] = "docker"
-            return resultat
-        logger.warning("[8/8] Docker Validation Agent : echec tentative %d — correction en cours — %s",
-                       tentative_docker, rapport_validation.erreurs)
-        resultat["rapport_dockerisation"] = appliquer_corrections_dockerisation(rapport_validation.erreurs, dossier_docker)
-
-    logger.info("=== Run termine avec SUCCES pour '%s' ===", besoin.titre_projet)
-    return resultat
+    if etat_final["succes"]:
+        logger.info("=== Run termine avec SUCCES pour '%s' ===", besoin.titre_projet)
+    return etat_final

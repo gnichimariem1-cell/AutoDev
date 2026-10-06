@@ -40,6 +40,12 @@ projet AutoDev qui a deja son propre docker-compose.yml) :
   (postgres:16, volume nomme pour persister les donnees)
 - un fichier .dockerignore adapte
 
+Le DATABASE_URL du service "app" doit utiliser le pilote PostgreSQL installe par
+{dossier_backend}/requirements.txt (ne pas en ajouter un autre) :
+- psycopg2 ou psycopg2-binary -> postgresql+psycopg2://...
+- psycopg (version 3, ex : psycopg[binary]) -> postgresql+psycopg://...
+- asyncpg -> postgresql+asyncpg://...
+
 Les services "app" et "frontend" doivent publier leur port sur l'hote (ex : 8000 et
 8080) : la configuration sera testee automatiquement (build, demarrage, requetes HTTP).
 

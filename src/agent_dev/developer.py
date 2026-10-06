@@ -24,7 +24,13 @@ def generer_code(user_stories: SortiePO, dossier_sortie: str = "output/backend",
     prompt = f"""Génère une API FastAPI + PostgreSQL dans {dossier_sortie} pour ces User Stories :
 {user_stories.model_dump_json(indent=2)}
 
-{bloc_architecture}Inclus également, pour que n'importe qui puisse lancer le backend avec Docker :
+{bloc_architecture}Génère UNIQUEMENT le backend (l'API) : aucun fichier HTML/CSS/JavaScript, pas de dossier
+frontend/ ni static/, et l'API ne sert pas de fichiers statiques (pas de StaticFiles). Le frontend
+est généré séparément par un autre agent et servi par son propre conteneur : ignore les modules
+frontend de l'architecture ci-dessus. Active CORS (CORSMiddleware) pour que ce frontend, servi sur
+un autre port (ex : http://localhost:8080), puisse appeler l'API.
+
+Inclus également, pour que n'importe qui puisse lancer le backend avec Docker :
 - un Dockerfile pour l'application FastAPI (image python slim, installation des
   dependances, exposition du port 8000)
 - un docker-compose.yml avec deux services : "app" (le backend) et "db"

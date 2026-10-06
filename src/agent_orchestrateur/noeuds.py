@@ -84,7 +84,10 @@ def noeud_correction_backend(etat: EtatPipeline) -> dict:
 @_proteger("frontend")
 def noeud_frontend(etat: EtatPipeline) -> dict:
     logger.info("[5/8] Frontend Agent : demarrage")
-    sortie_frontend = generer_frontend(etat["user_stories"], etat["dossier_backend"], etat["dossier_frontend"])
+    sortie_frontend = generer_frontend(
+        etat["user_stories"], etat["dossier_backend"], etat["dossier_frontend"],
+        architecture=etat.get("architecture"), organisation_interface=etat["besoin"].structure_projet,
+    )
     logger.info("[5/8] Frontend Agent : OK (%d fichiers generes)", len(sortie_frontend.fichiers_generes))
     return {"sortie_frontend": sortie_frontend}
 

@@ -37,6 +37,15 @@ def lancer_tests(dossier_code: str) -> RapportQA:
                 f"stderr : {resultat_install.stderr[-2000:]}"
             )
 
+    # Le backend genere importe ses modules depuis sa racine (ex : `from app.main import app`)
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in [os.path.abspath(dossier_code), env.get("PYTHONPATH")] if p
+    )
+    # Evite de relire le rapport d'un run precedent si pytest plante avant de l'ecrire
+    for ancien in ("rapport_pytest.json", "coverage.json"):
+        if os.path.exists(ancien):
+            os.remove(ancien)
+
     resultat = subprocess.run(
         ["pytest", dossier_code, "--cov", dossier_code,
          "--cov-report=json", "--json-report", "--json-report-file=rapport_pytest.json"],
@@ -66,14 +75,27 @@ def lancer_tests(dossier_code: str) -> RapportQA:
         couverture = json.load(f)
 
     tests_passes = rapport["summary"].get("passed", 0)
-    tests_echoues = rapport["summary"].get("failed", 0)
-    erreurs = [t["nodeid"] for t in rapport["tests"] if t["outcome"] == "failed"]
+    # "error" : echec pendant le setup/teardown d'un test (ex : fixture qui plante)
+    tests_echoues = rapport["summary"].get("failed", 0) + rapport["summary"].get("error", 0)
+    erreurs = [
+        t["nodeid"] for t in rapport.get("tests", []) if t["outcome"] in ("failed", "error")
+    ]
+    # Fichiers de test qui n'ont pas pu etre importes (ex : ImportError)
+    erreurs += [
+        f"Erreur de collecte {c['nodeid']} : {c.get('longrepr', '')[-1000:]}"
+        for c in rapport.get("collectors", []) if c["outcome"] == "failed"
+    ]
+    if rapport["summary"].get("total", tests_passes + tests_echoues) == 0:
+        erreurs.append(
+            f"Aucun test pytest trouve dans {dossier_code} : ecris des tests (dossier tests/, "
+            "fichiers test_*.py) couvrant les endpoints de l'API."
+        )
 
     return RapportQA(
         tests_passes=tests_passes,
         tests_echoues=tests_echoues,
         couverture_pct=couverture["totals"]["percent_covered"],
-        succes=(tests_echoues == 0),
+        succes=(len(erreurs) == 0),
         erreurs=erreurs,
     )
 

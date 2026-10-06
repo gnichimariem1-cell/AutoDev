@@ -33,6 +33,15 @@ def generer_code(user_stories: SortiePO, dossier_sortie: str = "output/backend",
 - un fichier .env.example listant les variables necessaires (DATABASE_URL,
   SECRET_KEY, etc.), coherentes avec docker-compose.yml
 
+Inclus des tests pytest dans {dossier_sortie}/tests/ (fichiers test_*.py) qui couvrent
+les endpoints de l'API avec fastapi.testclient.TestClient :
+- les tests doivent passer sans aucun service externe : pas de PostgreSQL, utilise une
+  base SQLite (fichier temporaire ou en memoire, avec StaticPool) et surcharge la
+  dependance de session via app.dependency_overrides
+- ils seront lances par `pytest {dossier_sortie}` avec {dossier_sortie} dans le PYTHONPATH :
+  importe le code depuis la racine du backend (ex : `from app.main import app`)
+- ajoute pytest et httpx dans requirements.txt
+
 Le projet généré doit être autonome : sur une machine tierce, `docker compose up -d db`
 dans {dossier_sortie} doit suffire à démarrer une base de données compatible avec le
 DATABASE_URL par défaut du code, sans dépendre d'un conteneur externe préexistant.

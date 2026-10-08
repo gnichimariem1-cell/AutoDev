@@ -1,7 +1,7 @@
 ﻿import subprocess
+import os
 import json
 import shutil
-import os
 from pathlib import Path
 from src.common.schemas import SortiePO, SortieDev, SortieArchitecte
 
@@ -24,15 +24,30 @@ def generer_code(user_stories: SortiePO, dossier_sortie: str = "output/backend",
     prompt = f"""Génère une API FastAPI + PostgreSQL dans {dossier_sortie} pour ces User Stories :
 {user_stories.model_dump_json(indent=2)}
 
-{bloc_architecture}Inclus également, pour que n'importe qui puisse lancer le backend avec Docker :
-- un Dockerfile pour l'application FastAPI (image python slim, installation des
-  dependances, exposition du port 8000, utilisateur non-root pour executer
-  l'application — ne PAS rester en root dans le conteneur final)
-- un docker-compose.yml avec deux services : "app" (le backend) et "db"
-  (postgres:16, avec un volume nomme pour persister les donnees et les
-  variables d'environnement POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB)
-- un fichier .env.example listant les variables necessaires (DATABASE_URL,
-  SECRET_KEY, etc.), coherentes avec docker-compose.yml
+{bloc_architecture}Génère UNIQUEMENT le backend (l'API) : aucun fichier HTML/CSS/JavaScript, pas de dossier
+frontend/ ni static/, et l'API ne sert pas de fichiers statiques (pas de StaticFiles). Le frontend
+est généré séparément par un autre agent et servi par son propre conteneur : ignore les modules
+frontend de l'architecture ci-dessus. Active CORS (CORSMiddleware) pour que ce frontend, servi sur
+un autre port (ex : http://localhost:8080), puisse appeler l'API.
+
+Inclus également :
+- un fichier .env.example listant les variables necessaires (DATABASE_URL, SECRET_KEY, etc.)
+- un README.md qui documente comment lancer l'API : variables d'environnement, creation
+  ou migration du schema de la base, initialisation eventuelle (ex : compte admin) et
+  commande de demarrage (uvicorn sur le port 8000)
+
+Ne génère PAS de Dockerfile ni de docker-compose.yml : la configuration Docker de
+l'ensemble (backend, frontend, base PostgreSQL) est produite ensuite par un autre agent,
+a partir de ce README.md.
+
+Inclus des tests pytest dans {dossier_sortie}/tests/ (fichiers test_*.py) qui couvrent
+les endpoints de l'API avec fastapi.testclient.TestClient :
+- les tests doivent passer sans aucun service externe : pas de PostgreSQL, utilise une
+  base SQLite (fichier temporaire ou en memoire, avec StaticPool) et surcharge la
+  dependance de session via app.dependency_overrides
+- ils seront lances par `pytest {dossier_sortie}` avec {dossier_sortie} dans le PYTHONPATH :
+  importe le code depuis la racine du backend (ex : `from app.main import app`)
+- ajoute pytest et httpx dans requirements.txt
 
 Écris les fichiers directement sur disque."""
 
@@ -43,7 +58,9 @@ def generer_code(user_stories: SortiePO, dossier_sortie: str = "output/backend",
         encoding="utf-8", errors="replace",
     )
     if resultat.returncode != 0:
-        raise RuntimeError(f"Claude Code a échoué : {resultat.stdout}\n{resultat.stderr}")
+        raise RuntimeError(
+            f"Claude Code a échoué : {resultat.stdout}\n{resultat.stderr}"
+        )
 
     fichiers = [str(p) for p in Path(dossier_sortie).rglob("*.py")]
     return SortieDev(fichiers_generes=fichiers, resume_technique=resultat.stdout[:500])
@@ -59,6 +76,8 @@ def appliquer_corrections(rapport_erreurs: list[str], dossier_sortie: str = "out
         encoding="utf-8", errors="replace",
     )
     if resultat.returncode != 0:
-        raise RuntimeError(f"Correction échouée : {resultat.stdout}\n{resultat.stderr}")
+        raise RuntimeError(
+            f"Correction échouée : {resultat.stdout}\n{resultat.stderr}"
+        )
     fichiers = [str(p) for p in Path(dossier_sortie).rglob("*.py")]
     return SortieDev(fichiers_generes=fichiers, resume_technique=resultat.stdout[:500])

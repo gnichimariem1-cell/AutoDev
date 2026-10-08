@@ -25,3 +25,6 @@ def test_generer_user_stories_parse_reponse_ollama(mock_post):
     resultat = generer_user_stories(besoin)
     assert len(resultat.user_stories) == 1
     assert resultat.user_stories[0].priorite == "haute"
+    requete = mock_post.call_args.kwargs["json"]
+    assert requete["format"]["properties"]["user_stories"]["type"] == "array"
+    assert requete["think"] is False

@@ -14,3 +14,8 @@ def test_generer_code_appelle_claude_et_liste_fichiers(mock_run, tmp_path):
     resultat = generer_code(stories, dossier_sortie=str(tmp_path))
     assert mock_run.called
     assert any("main.py" in f for f in resultat.fichiers_generes)
+    prompt = mock_run.call_args.kwargs["input"]
+    assert "UNIQUEMENT le backend" in prompt
+    assert "CORSMiddleware" in prompt
+    assert "Ne génère PAS de Dockerfile ni de docker-compose.yml" in prompt
+    assert "README.md" in prompt

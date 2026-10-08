@@ -2,7 +2,7 @@ import json
 import subprocess
 import shutil
 from pathlib import Path
-from src.common.schemas import SortiePO, SortieFrontend
+from src.common.schemas import SortiePO, SortieFrontend, SortieArchitecte
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
 
@@ -14,12 +14,28 @@ Commence par lire les routes de {dossier_backend}/app/routers/ pour connaître l
 
 User Stories à couvrir :
 {user_stories_json}
-
+{bloc_conception}
 Contraintes :
-- Un fichier index.html comme point d'entrée, un app.js pour la logique, un style.css pour le style.
-- Utilise fetch() pour appeler l'API (URL de base configurable en haut de app.js, ex: http://localhost:8000).
+- index.html est le point d'entrée (page d'accueil) ; crée autant de pages que nécessaire, avec
+  du JavaScript et du CSS partagés entre les pages.
+- Utilise fetch() pour appeler l'API (URL de base configurable à un seul endroit, ex: http://localhost:8000).
 - Écris les fichiers directement sur disque.
 """
+
+
+def _bloc_conception(architecture: SortieArchitecte | None, organisation_interface: str) -> str:
+    """Organisation de l'interface demandee dans le formulaire + pages prevues par
+    l'Architect Agent (ses modules "frontend/...", les autres concernent le backend)."""
+    bloc = ""
+    if organisation_interface.strip():
+        bloc += f"\nOrganisation de l'interface demandée par l'utilisateur :\n{organisation_interface.strip()}\n"
+    if architecture:
+        pages = [m.removeprefix("frontend/") for m in architecture.structure_modules
+                 if m.split(" - ")[0].strip().startswith("frontend/")]
+        if pages:
+            bloc += ("\nPages et fichiers prévus par l'Architect Agent (chemins relatifs au dossier "
+                     "du frontend) :\n" + "\n".join(f"- {p}" for p in pages) + "\n")
+    return bloc
 
 
 def _lister_fichiers(dossier_sortie: str) -> list[str]:
@@ -30,12 +46,15 @@ def generer_frontend(
     user_stories: SortiePO,
     dossier_backend: str = "output/backend",
     dossier_sortie: str = "output/frontend",
+    architecture: SortieArchitecte | None = None,
+    organisation_interface: str = "",
 ) -> SortieFrontend:
     Path(dossier_sortie).mkdir(parents=True, exist_ok=True)
     prompt = PROMPT_TEMPLATE.format(
         dossier_sortie=dossier_sortie,
         dossier_backend=dossier_backend,
         user_stories_json=user_stories.model_dump_json(indent=2),
+        bloc_conception=_bloc_conception(architecture, organisation_interface),
     )
 
     resultat = subprocess.run(

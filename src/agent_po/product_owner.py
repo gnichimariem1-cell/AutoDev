@@ -65,7 +65,11 @@ def generer_user_stories(besoin: BesoinUtilisateur) -> SortiePO:
         "model": MODEL,
         "prompt": prompt,
         "stream": False,
-        "format": "json",
+        # Sortie structuree : Ollama contraint la generation au schema de SortiePO
+        # (champs obligatoires, valeurs de priorite), et non plus seulement a un JSON valide.
+        "format": SortiePO.model_json_schema(),
+        # Desactive le raisonnement de qwen3 : reponse plus courte et plus rapide.
+        "think": False,
     }, timeout=600)
     response.raise_for_status()
 

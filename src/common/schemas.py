@@ -54,3 +54,19 @@ class SortieDockerization(BaseModel):
     """Sortie du Dockerization Agent"""
     fichiers_generes: list[str]
     resume_technique: str
+
+class EtapeValidationDocker(BaseModel):
+    """Une etape de la validation Docker (config, build, demarrage, services)"""
+    nom: str
+    succes: bool
+    details: str = ""
+
+class RapportValidationDocker(BaseModel):
+    """Sortie du Docker Validation Agent"""
+    docker_disponible: bool
+    etapes: list[EtapeValidationDocker] = []
+    succes: bool
+    erreurs: list[str] = []
+    # True si l'echec vient de la machine (ex : port deja occupe) et non de la
+    # configuration generee : inutile alors de demander une correction a Claude.
+    erreur_environnement: bool = False

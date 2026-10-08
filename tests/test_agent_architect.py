@@ -29,6 +29,21 @@ def test_generer_architecture_retourne_une_sortie_architecte(mock_run):
 
 
 @patch("src.agent_architect.architect.subprocess.run")
+def test_generer_architecture_retire_les_balises_markdown(mock_run):
+    reponse_json = json.dumps({
+        "stack_technique": ["FastAPI", "PostgreSQL"],
+        "structure_modules": ["app/main.py - point d'entree"],
+        "justification": "Stack simple et eprouvee pour une API CRUD.",
+    })
+    mock_run.return_value = MagicMock(returncode=0, stdout=f"```json\n{reponse_json}\n```", stderr="")
+
+    resultat = generer_architecture(_user_stories_exemple())
+
+    assert isinstance(resultat, SortieArchitecte)
+    assert "FastAPI" in resultat.stack_technique
+
+
+@patch("src.agent_architect.architect.subprocess.run")
 def test_generer_architecture_leve_une_erreur_si_claude_code_echoue(mock_run):
     mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="boom")
 

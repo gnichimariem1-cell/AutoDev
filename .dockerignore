@@ -10,3 +10,5 @@ htmlcov/
 coverage.json
 rapport_pytest.json
 .env
+checkpoints/
+logs/

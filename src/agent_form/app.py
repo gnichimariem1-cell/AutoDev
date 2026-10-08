@@ -1,12 +1,6 @@
-<<<<<<< HEAD
-﻿import os
+import os
 import re
-import gradio as gr
-from src.common.schemas import BesoinUtilisateur
-from dotenv import load_dotenv
-from src.agent_orchestrateur.orchestrateur import executer_pipeline
-=======
-﻿import threading
+import threading
 import time
 
 from dotenv import load_dotenv
@@ -21,9 +15,6 @@ from src.common.schemas import BesoinUtilisateur
 from src.agent_orchestrateur.orchestrateur import (
     executer_pipeline_en_direct, reprendre_pipeline_en_direct, point_de_reprise, RepriseImpossible,
 )
->>>>>>> origin/med-branch
-
-load_dotenv()  # charge les variables de .env dans os.environ
 
 LONGUEUR_MAX_DESCRIPTION = 1000
 LONGUEUR_MAX_CHAMP_COURT = 200
@@ -224,8 +215,6 @@ def _ligne_titre(resultat) -> str:
 
 
 def construire_rapport_detaille(resultat, sections_choisies=None) -> str:
-<<<<<<< HEAD
-=======
     """Construit un rapport texte agent par agent. sections_choisies filtre
     quelles sections apparaissent. None = tout afficher (valeur par defaut,
     utilisee au tout premier appel) ; une liste (meme vide) = respecter
@@ -234,7 +223,6 @@ def construire_rapport_detaille(resultat, sections_choisies=None) -> str:
     telles plutot que simplement omises ; pendant un run (cle "_en_cours"),
     elles sont marquees "(en attente)".
     """
->>>>>>> origin/med-branch
     if sections_choisies is None:
         sections_choisies = TOUTES_LES_SECTIONS
 
@@ -378,7 +366,8 @@ def _suivre_dans_la_vue(run: RunEnArrierePlan, sections_choisies, sortie_initial
 def lancer_pipeline_complet(titre, description, utilisateurs, fonctionnalites, structure, sections_choisies):
     erreur_validation = valider_besoin(titre, description, utilisateurs, fonctionnalites, structure)
     if erreur_validation:
-        return f"❌ Entree refusee : {erreur_validation}", "{}", None
+        yield f"❌ Entree refusee : {erreur_validation}", "{}", None, *_boutons(True), ""
+        return
 
     besoin = collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure)
     run = _demarrer_run(executer_pipeline_en_direct(besoin))

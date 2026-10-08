@@ -6,16 +6,20 @@ services:
     env_file:
       - .env
     environment:
-      # Par defaut on joint l'Ollama installe sur la machine hote.
-      # Adapter dans .env si Ollama tourne ailleurs.
-      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434/api/generate}
+      # Dans le conteneur, "localhost" designe le conteneur lui-meme : on joint
+      # l'Ollama de la machine hote via host.docker.internal. Cette valeur remplace
+      # OLLAMA_URL de .env (qui reste valable pour un lancement sans Docker).
+      # Si Ollama tourne ailleurs, definir OLLAMA_URL_DOCKER dans .env.
+      OLLAMA_URL: ${OLLAMA_URL_DOCKER:-http://host.docker.internal:11434/api/generate}
     extra_hosts:
       # Permet au conteneur de resoudre host.docker.internal (Linux inclus).
       - "host.docker.internal:host-gateway"
     volumes:
-      # Les backends generes par le pipeline sont persistes sur l'hote.
+      # Code + sorties (output/, logs/, checkpoints/) partages avec l'hote.
       - .:/app
-      # Decommenter pour utiliser une session Claude Code deja authentifiee
-      # sur l'hote au lieu de ANTHROPIC_API_KEY :
-      - ~/.claude:/root/.claude:ro
-      - ~/.claude.json:/root/.claude.json:ro
+      # Optionnel : utiliser une session Claude Code deja connectee sur l'hote au
+      # lieu de ANTHROPIC_API_KEY. A decommenter seulement si ces fichiers existent
+      # (sinon Docker cree des dossiers vides a leur place).
+      # - ~/.claude:/root/.claude:ro
+      # - ~/.claude.json:/root/.claude.json:ro
+    restart: unless-stopped

@@ -11,6 +11,11 @@ pas ; l'erreur est placee dans l'etat et le routage envoie vers le noeud echec,
 pour que la Vue affiche quand meme le rapport detaille.
 """
 import functools
+import os
+import subprocess
+import time
+
+import requests
 
 from src.common.logging_config import configurer_logging
 from src.agent_po.product_owner import generer_user_stories
@@ -25,15 +30,46 @@ from src.agent_orchestrateur.etat import EtatPipeline, MAX_TENTATIVES
 logger = configurer_logging()
 
 
+# Relance automatique d'un agent en cas d'erreur PASSAGERE (timeout, coupure
+# reseau, Claude surcharge) : ESSAIS_AGENT essais au total, attente croissante.
+# Une erreur DURABLE (credit epuise, cle invalide...) n'est pas relancee :
+# le run part vers echec et peut etre repris avec le bouton "Reprendre".
+ESSAIS_AGENT = max(1, int(os.environ.get("ESSAIS_AGENT", 2)))
+ATTENTE_RELANCE = float(os.environ.get("ATTENTE_RELANCE", 10))
+
+ERREURS_PASSAGERES = (
+    TimeoutError,
+    ConnectionError,
+    subprocess.TimeoutExpired,
+    requests.ConnectionError,
+    requests.Timeout,
+)
+MOTS_ERREUR_PASSAGERE = ("overloaded", "rate limit", "rate_limit", "529", "503", "temporarily unavailable")
+
+
+def est_erreur_passagere(e: Exception) -> bool:
+    if isinstance(e, ERREURS_PASSAGERES):
+        return True
+    message = str(e).lower()
+    return any(mot in message for mot in MOTS_ERREUR_PASSAGERE)
+
+
 def _proteger(nom_noeud: str):
     def decorateur(noeud):
         @functools.wraps(noeud)
         def noeud_protege(etat: EtatPipeline) -> dict:
-            try:
-                return noeud(etat)
-            except Exception as e:
-                logger.exception("Plantage du noeud %s", nom_noeud)
-                return {"etape": nom_noeud, "erreur": f"{type(e).__name__} : {e}"}
+            for essai in range(1, ESSAIS_AGENT + 1):
+                try:
+                    return noeud(etat)
+                except Exception as e:
+                    if est_erreur_passagere(e) and essai < ESSAIS_AGENT:
+                        attente = ATTENTE_RELANCE * essai
+                        logger.warning("Noeud %s : erreur passagere (%s : %s), relance automatique %d/%d dans %.0f s",
+                                       nom_noeud, type(e).__name__, e, essai + 1, ESSAIS_AGENT, attente)
+                        time.sleep(attente)
+                        continue
+                    logger.exception("Plantage du noeud %s (essai %d/%d)", nom_noeud, essai, ESSAIS_AGENT)
+                    return {"etape": nom_noeud, "erreur": f"{type(e).__name__} : {e}"}
         return noeud_protege
     return decorateur
 

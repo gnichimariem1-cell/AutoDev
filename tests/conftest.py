@@ -7,7 +7,7 @@ import pytest
 
 # Les tests ne doivent pas ecrire dans checkpoints/pipeline.sqlite : base en memoire.
 os.environ.setdefault("CHECKPOINT_DB", ":memory:")
-
+os.environ.setdefault("ATTENTE_RELANCE", "0")
 from tests import sorties  # noqa: E402
 
 SORTIES_PAR_DEFAUT = {

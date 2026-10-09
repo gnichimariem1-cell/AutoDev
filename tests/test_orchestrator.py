@@ -21,7 +21,11 @@ def test_pipeline_echoue_apres_3_tentatives_backend(agents):
     assert resultat["succes"] is False
     assert resultat["etape"] == "backend"
     assert resultat["tentative_backend"] == 3
-    assert agents.appliquer_corrections.call_count == 2
+    # 3 tentatives, revision des tests par le Test Agent, puis 3 nouvelles tentatives
+    agents.reviser_tests.assert_called_once()
+    assert resultat["tests_revises"] is True
+    assert agents.lancer_tests.call_count == 6
+    assert agents.appliquer_corrections.call_count == 4
     agents.generer_frontend.assert_not_called()
 
 

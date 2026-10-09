@@ -3,7 +3,7 @@ from src.agent_orchestrateur.graphe import construire_graphe, schema_markdown, F
 from src.agent_orchestrateur.orchestrateur import executer_pipeline, executer_pipeline_en_direct
 from src.agent_orchestrateur.routage import continuer_ou_abandonner, router_qa_backend, router_qa_frontend, router_validation_docker
 from src.common.schemas import RapportValidationDocker
-from tests.sorties import BESOIN, QA_OK, QA_KO, FE_OK, FE_KO, DOCKER_KO
+from tests.sorties import BESOIN, QA_OK, QA_KO, FE_OK, FE_KO, DOCKER_KO, PLAN_TESTS
 
 
 # --- Routeurs : fonctions pures, aucun mock necessaire ---
@@ -23,7 +23,11 @@ def test_routeurs_qa_abandonnent_si_plantage():
 def test_router_qa_backend():
     assert router_qa_backend({"rapport_backend": QA_OK, "tentative_backend": 1}) == "ok"
     assert router_qa_backend({"rapport_backend": QA_KO, "tentative_backend": 1}) == "corriger"
-    assert router_qa_backend({"rapport_backend": QA_KO, "tentative_backend": MAX_TENTATIVES}) == "abandon"
+    # derniere tentative : une revision des tests par le Test Agent, puis abandon
+    assert router_qa_backend({"rapport_backend": QA_KO, "tentative_backend": MAX_TENTATIVES,
+                              "plan_tests": PLAN_TESTS}) == "reviser_tests"
+    assert router_qa_backend({"rapport_backend": QA_KO, "tentative_backend": MAX_TENTATIVES,
+                              "plan_tests": PLAN_TESTS, "tests_revises": True}) == "abandon"
 
 
 def test_router_qa_frontend():
@@ -53,7 +57,7 @@ def test_structure_du_graphe():
     # Chaque noeud d'agent peut aller vers echec en cas de plantage
     plantages = {
         (n, "echec") for n in [
-            "po", "architect", "test_agent", "developer", "correction_backend", "frontend",
+            "po", "architect", "test_agent", "developer", "correction_backend", "revision_tests", "frontend",
             "correction_frontend", "dockerization", "correction_docker",
         ]
     }
@@ -61,6 +65,7 @@ def test_structure_du_graphe():
         ("__start__", "po"), ("po", "architect"), ("architect", "test_agent"),
         ("test_agent", "developer"), ("developer", "qa_backend"),
         ("qa_backend", "frontend"), ("qa_backend", "correction_backend"), ("qa_backend", "echec"),
+        ("qa_backend", "revision_tests"), ("revision_tests", "qa_backend"),
         ("correction_backend", "qa_backend"),
         ("frontend", "qa_frontend"),
         ("qa_frontend", "dockerization"), ("qa_frontend", "correction_frontend"), ("qa_frontend", "echec"),
@@ -92,7 +97,7 @@ def test_pire_cas_reste_sous_la_limite_de_recursion(agents):
     assert resultat["tentative_backend"] == MAX_TENTATIVES
     assert resultat["tentative_frontend"] == MAX_TENTATIVES
     assert resultat["tentative_docker"] == MAX_TENTATIVES
-    noeuds_executes = 7 + 3 * (2 * MAX_TENTATIVES - 1)
+    noeuds_executes = 7 + 3 * (2 * MAX_TENTATIVES - 1) + 2 * MAX_TENTATIVES
     assert noeuds_executes < LIMITE_RECURSION
 
 

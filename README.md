@@ -1,4 +1,4 @@
-﻿# AutoDev â€” MVP Multi-Agents
+# AutoDev â€” MVP Multi-Agents
 
 Pipeline automatisÃ© qui gÃ©nÃ¨re un backend FastAPI **et** un frontend web complets Ã  partir d'un besoin utilisateur, via des agents IA orchestrÃ©s.
 
@@ -13,7 +13,8 @@ Formulaire utilisateur (Gradio, Vue)
 -> Agent Orchestrateur (Controleur)
 -> Product Owner Agent (Qwen3 via Ollama)
 -> Architect Agent (Claude Code - propose stack technique et structure du projet, sans generer de code)
--> Developer Agent (Claude Code + FastAPI, respecte architecture proposee)
+-> Test Agent (Claude Code - ecrit le plan de test et les tests pytest AVANT le code, TDD ; seul a pouvoir les corriger)
+-> Developer Agent (Claude Code + FastAPI, respecte architecture proposee, fait passer les tests du Test Agent sans les modifier)
 -> QA Agent Backend (Pytest + coverage.py)
   boucle de correction (max MAX_TENTATIVES, defaut 3)
 -> Frontend Agent (Claude Code + HTML/CSS/JS vanilla, consomme API backend)

@@ -1,9 +1,10 @@
-﻿import subprocess
+import subprocess
 import os
 import json
 import shutil
 from pathlib import Path
 from src.common.schemas import SortiePO, SortieDev, SortieArchitecte
+from src.agent_test.testeur import CONTRAT_TECHNIQUE
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
 
@@ -40,13 +41,13 @@ Ne génère PAS de Dockerfile ni de docker-compose.yml : la configuration Docker
 l'ensemble (backend, frontend, base PostgreSQL) est produite ensuite par un autre agent,
 a partir de ce README.md.
 
-Inclus des tests pytest dans {dossier_sortie}/tests/ (fichiers test_*.py) qui couvrent
-les endpoints de l'API avec fastapi.testclient.TestClient :
-- les tests doivent passer sans aucun service externe : pas de PostgreSQL, utilise une
-  base SQLite (fichier temporaire ou en memoire, avec StaticPool) et surcharge la
-  dependance de session via app.dependency_overrides
-- ils seront lances par `pytest {dossier_sortie}` avec {dossier_sortie} dans le PYTHONPATH :
-  importe le code depuis la racine du backend (ex : `from app.main import app`)
+Les tests existent DEJA dans {dossier_sortie}/tests/ : ils ont ete ecrits avant le code par le
+Test Agent, d'apres le plan {dossier_sortie}/PLAN_DE_TEST.md. Lis-les d'abord : ils fixent les routes,
+les champs JSON et les codes de reponse attendus. Ecris le code pour qu'ils passent tous.
+- Ne modifie PAS, ne supprime PAS et n'ajoute PAS de fichiers dans {dossier_sortie}/tests/
+  (toute modification sera annulee automatiquement)
+- respecte ce contrat technique, que les tests utilisent :
+{CONTRAT_TECHNIQUE}
 - ajoute pytest et httpx dans requirements.txt
 
 Écris les fichiers directement sur disque."""

@@ -17,7 +17,8 @@ def router_qa_backend(etat: EtatPipeline) -> str:
     if etat["rapport_backend"].succes:
         return "ok"
     if etat["tentative_backend"] >= MAX_TENTATIVES:
-        return "abandon"
+        # Avant d'abandonner, le Test Agent verifie une fois si ce sont ses tests qui sont faux
+        return "abandon" if etat.get("tests_revises") or not etat.get("plan_tests") else "reviser_tests"
     return "corriger"
 
 

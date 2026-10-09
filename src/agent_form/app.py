@@ -202,6 +202,7 @@ LIBELLES_NOEUDS = {
     "developer": "Developer Agent",
     "qa_backend": "QA Agent (backend)",
     "correction_backend": "Correction du backend",
+    "revision_tests": "Revision des tests (Test Agent)",
     "frontend": "Frontend Agent",
     "qa_frontend": "QA Agent (frontend)",
     "correction_frontend": "Correction du frontend",

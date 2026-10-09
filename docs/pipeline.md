@@ -20,6 +20,7 @@ graph TD;
 	developer(developer)
 	qa_backend(qa_backend)
 	correction_backend(correction_backend)
+	revision_tests(revision_tests)
 	frontend(frontend)
 	qa_frontend(qa_frontend)
 	correction_frontend(correction_frontend)
@@ -48,9 +49,12 @@ graph TD;
 	qa_backend -. &nbsp;corriger&nbsp; .-> correction_backend;
 	qa_backend -. &nbsp;abandon&nbsp; .-> echec;
 	qa_backend -. &nbsp;ok&nbsp; .-> frontend;
+	qa_backend -. &nbsp;reviser_tests&nbsp; .-> revision_tests;
 	qa_frontend -. &nbsp;corriger&nbsp; .-> correction_frontend;
 	qa_frontend -. &nbsp;ok&nbsp; .-> dockerization;
 	qa_frontend -. &nbsp;abandon&nbsp; .-> echec;
+	revision_tests -. &nbsp;abandon&nbsp; .-> echec;
+	revision_tests -. &nbsp;continuer&nbsp; .-> qa_backend;
 	test_agent -. &nbsp;continuer&nbsp; .-> developer;
 	test_agent -. &nbsp;abandon&nbsp; .-> echec;
 	validation_docker -. &nbsp;ok&nbsp; .-> __end__;

@@ -14,6 +14,7 @@ SORTIES_PAR_DEFAUT = {
     "generer_user_stories": sorties.USER_STORIES,
     "generer_architecture": sorties.ARCHITECTURE,
     "generer_plan_et_tests": sorties.PLAN_TESTS,
+    "reviser_tests": sorties.PLAN_TESTS,
     "generer_code": sorties.SORTIE_DEV,
     "appliquer_corrections": sorties.SORTIE_DEV,
     "lancer_tests": sorties.QA_OK,

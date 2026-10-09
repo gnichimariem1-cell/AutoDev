@@ -21,7 +21,7 @@ from src.common.logging_config import configurer_logging
 from src.agent_po.product_owner import generer_user_stories
 from src.agent_architect.architect import generer_architecture
 from src.agent_dev.developer import generer_code, appliquer_corrections
-from src.agent_test.testeur import generer_plan_et_tests, lire_tests
+from src.agent_test.testeur import generer_plan_et_tests, reviser_tests, lire_tests, restaurer_tests
 from src.agent_frontend.frontend import generer_frontend, appliquer_corrections_frontend
 from src.agent_qa.qa import lancer_tests, lancer_tests_frontend
 from src.agent_dockerization.dockerization import generer_dockerisation, appliquer_corrections_dockerisation
@@ -111,20 +111,19 @@ def noeud_developer(etat: EtatPipeline) -> dict:
 def noeud_qa_backend(etat: EtatPipeline) -> dict:
     tentative = etat.get("tentative_backend", 0) + 1
     logger.info("[5/9] QA Agent backend : tentative %d/%d", tentative, MAX_TENTATIVES)
+    # Les tests appartiennent au Test Agent : si un autre agent les a modifies,
+    # supprimes ou en a ajoute, on remet les originaux avant de les lancer.
+    touches = restaurer_tests(etat["dossier_backend"], etat["tests_originaux"]) if etat.get("tests_originaux") else []
     rapport = lancer_tests(etat["dossier_backend"])
-    # Garde-fou : une correction ne doit pas "reussir" en supprimant des tests
-    nb_tests = rapport.tests_passes + rapport.tests_echoues
-    nb_precedent = etat.get("nb_tests_backend", 0)
-    if nb_tests < nb_precedent:
-        logger.warning("[5/9] QA Agent backend : le nombre de tests a diminue (%d -> %d)", nb_precedent, nb_tests)
+    if touches:
+        logger.warning("[5/9] QA Agent backend : tests modifies par la correction, originaux restaures : %s", touches)
         rapport = rapport.model_copy(update={"succes": False, "erreurs": rapport.erreurs + [
-            f"Le nombre de tests a diminue ({nb_precedent} -> {nb_tests}) : remets les tests supprimes "
-            "et corrige le code de l'application, pas les tests."]})
+            f"Les fichiers de tests ont ete modifies ({', '.join(touches)}) : ils ont ete restaures. "
+            "Ne touche pas aux tests, corrige uniquement le code de l'application."]})
     if rapport.succes:
         logger.info("[5/9] QA Agent backend : OK (%d tests passes, couverture %.1f%%)",
                     rapport.tests_passes, rapport.couverture_pct)
-    return {"rapport_backend": rapport, "tentative_backend": tentative, "etape": "backend",
-            "nb_tests_backend": max(nb_tests, nb_precedent)}
+    return {"rapport_backend": rapport, "tentative_backend": tentative, "etape": "backend"}
 
 
 @_proteger("correction_backend")
@@ -133,6 +132,19 @@ def noeud_correction_backend(etat: EtatPipeline) -> dict:
     logger.warning("[5/9] QA Agent backend : echec tentative %d — correction en cours — %s",
                    etat["tentative_backend"], rapport.erreurs)
     return {"sortie_dev": appliquer_corrections(rapport.erreurs, etat["dossier_backend"])}
+
+
+@_proteger("revision_tests")
+def noeud_revision_tests(etat: EtatPipeline) -> dict:
+    """Le code a ete corrige MAX_TENTATIVES fois sans succes : le Test Agent
+    verifie si ce sont ses tests qui sont faux. Une seule revision par run ;
+    le Developer a ensuite de nouveau MAX_TENTATIVES essais."""
+    rapport = etat["rapport_backend"]
+    logger.warning("[5/9] QA Agent backend : echec apres %d tentatives — revision des tests par le Test Agent — %s",
+                   etat["tentative_backend"], rapport.erreurs)
+    plan = reviser_tests(rapport.erreurs, etat["dossier_backend"], etat["plan_tests"])
+    return {"plan_tests": plan, "tests_originaux": lire_tests(etat["dossier_backend"]),
+            "tests_revises": True, "tentative_backend": 0}
 
 
 @_proteger("frontend")

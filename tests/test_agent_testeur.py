@@ -115,3 +115,58 @@ def test_rapport_affiche_le_test_agent(agents):
     rapport = construire_rapport_detaille(executer_pipeline(BESOIN))
     assert "2b. Test Agent — OK" in rapport
     assert "T01 POST /tasks -> 201" in rapport
+
+
+# --- Etape 3 : le Developer ne touche plus aux tests ---
+
+@patch("src.agent_dev.developer.subprocess.run")
+def test_developer_n_ecrit_plus_les_tests(mock_run, tmp_path):
+    from src.agent_dev.developer import generer_code
+    mock_run.return_value = MagicMock(returncode=0, stdout="OK", stderr="")
+    generer_code(USER_STORIES, dossier_sortie=str(tmp_path))
+    prompt = mock_run.call_args.kwargs["input"]
+    assert "Les tests existent DEJA" in prompt
+    assert "Inclus des tests pytest" not in prompt
+    assert "from app.main import app" in prompt
+
+
+def test_tests_modifies_par_la_correction_sont_restaures(agents):
+    from src.agent_orchestrateur.orchestrateur import executer_pipeline
+    from tests.sorties import BESOIN, PLAN_TESTS, QA_KO, QA_OK
+    fichier = Path("output/backend/tests/test_taches.py")
+
+    def ecrire_tests(*args, **kwargs):
+        fichier.parent.mkdir(parents=True, exist_ok=True)
+        fichier.write_text("def test_T01():\n    assert reponse.status_code == 201\n")
+        return PLAN_TESTS
+
+    appels = []
+
+    def corriger(*args, **kwargs):
+        # 1re correction : tentative de triche ; 2e : vraie correction du code
+        appels.append(args)
+        if len(appels) == 1:
+            fichier.write_text("def test_T01():\n    pass\n")
+
+    agents.generer_plan_et_tests.side_effect = ecrire_tests
+    agents.appliquer_corrections.side_effect = corriger
+    agents.lancer_tests.side_effect = [QA_KO, QA_OK, QA_OK]
+
+    resultat = executer_pipeline(BESOIN)
+
+    assert "status_code == 201" in fichier.read_text()
+    erreurs_envoyees = agents.appliquer_corrections.call_args_list[1].args[0]
+    assert any("ont ete restaures" in e for e in erreurs_envoyees)
+    assert resultat["succes"] is True
+
+
+def test_revision_des_tests_puis_succes(agents):
+    from src.agent_orchestrateur.orchestrateur import executer_pipeline
+    from tests.sorties import BESOIN, QA_KO, QA_OK
+    agents.lancer_tests.side_effect = [QA_KO, QA_KO, QA_KO, QA_OK]
+
+    resultat = executer_pipeline(BESOIN)
+
+    assert resultat["succes"] is True
+    agents.reviser_tests.assert_called_once()
+    assert resultat["tests_revises"] is True

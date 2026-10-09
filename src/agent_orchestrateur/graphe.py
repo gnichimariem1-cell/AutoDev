@@ -5,8 +5,10 @@ START -> po -> architect -> test_agent -> developer -> qa_backend -> frontend ->
 
 Chaque QA a trois sorties (voir routage.py) : "ok" vers l'etape suivante,
 "corriger" vers son noeud de correction (qui reboucle sur le QA), "abandon"
-vers le noeud echec. Les autres noeuds continuent vers le suivant, ou vont
-vers echec si leur agent a plante.
+vers le noeud echec. Le QA backend a une quatrieme sortie, "reviser_tests" :
+apres MAX_TENTATIVES corrections du code sans succes, le Test Agent verifie une
+fois ses propres tests avant l'abandon. Les autres noeuds continuent vers le
+suivant, ou vont vers echec si leur agent a plante.
 
 Le schema du graphe est exporte dans docs/pipeline.md :
     python -m src.agent_orchestrateur.graphe   (ou : make graphe)
@@ -25,7 +27,8 @@ from src.agent_orchestrateur.routage import (
 # developer, frontend, dockerization, echec (7) + pour chacune des 3 boucles, MAX_TENTATIVES
 # QA et MAX_TENTATIVES - 1 corrections. LangGraph s'arrete par defaut a 25 pas,
 # ce qui serait depasse des MAX_TENTATIVES=4 : on calcule donc la limite.
-LIMITE_RECURSION = 7 + 3 * (2 * MAX_TENTATIVES - 1) + 5
+# + revision_tests puis une seconde serie de MAX_TENTATIVES QA backend
+LIMITE_RECURSION = 7 + 3 * (2 * MAX_TENTATIVES - 1) + 2 * MAX_TENTATIVES + 5
 
 FICHIER_SCHEMA = Path("docs/pipeline.md")
 
@@ -39,6 +42,7 @@ def construire_graphe(checkpointer=None):
     graphe.add_node("developer", noeuds.noeud_developer)
     graphe.add_node("qa_backend", noeuds.noeud_qa_backend)
     graphe.add_node("correction_backend", noeuds.noeud_correction_backend)
+    graphe.add_node("revision_tests", noeuds.noeud_revision_tests)
     graphe.add_node("frontend", noeuds.noeud_frontend)
     graphe.add_node("qa_frontend", noeuds.noeud_qa_frontend)
     graphe.add_node("correction_frontend", noeuds.noeud_correction_frontend)
@@ -59,9 +63,11 @@ def construire_graphe(checkpointer=None):
     enchainer("developer", "qa_backend")
 
     graphe.add_conditional_edges("qa_backend", router_qa_backend, {
-        "ok": "frontend", "corriger": "correction_backend", "abandon": "echec",
+        "ok": "frontend", "corriger": "correction_backend",
+        "reviser_tests": "revision_tests", "abandon": "echec",
     })
     enchainer("correction_backend", "qa_backend")
+    enchainer("revision_tests", "qa_backend")
 
     enchainer("frontend", "qa_frontend")
     graphe.add_conditional_edges("qa_frontend", router_qa_frontend, {

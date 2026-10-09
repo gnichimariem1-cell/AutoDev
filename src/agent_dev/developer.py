@@ -68,7 +68,10 @@ les endpoints de l'API avec fastapi.testclient.TestClient :
 
 def appliquer_corrections(rapport_erreurs: list[str], dossier_sortie: str = "output/backend") -> SortieDev:
     prompt = f"""Corrige le code dans {dossier_sortie}. Voici les erreurs QA à résoudre :
-{json.dumps(rapport_erreurs, ensure_ascii=False, indent=2)}"""
+{json.dumps(rapport_erreurs, ensure_ascii=False, indent=2)}
+
+Ne modifie PAS et ne supprime PAS les fichiers de tests ({dossier_sortie}/tests/) :
+corrige uniquement le code de l'application pour que les tests existants passent."""
     resultat = subprocess.run(
         [CLAUDE_BIN, "-p", "--allowedTools", "Write,Edit,Bash"],
         input=prompt,

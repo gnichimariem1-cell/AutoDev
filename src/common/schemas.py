@@ -26,6 +26,22 @@ class SortieArchitecte(BaseModel):
     structure_modules: list[str]
     justification: str
 
+class CasDeTest(BaseModel):
+    """Un cas du plan de test ecrit par le Test Agent"""
+    id: str
+    user_story: str
+    scenario: str
+    methode: str
+    route: str
+    code_attendu: int
+    resultat_attendu: str
+    priorite: str = "haute"
+
+class SortieTestAgent(BaseModel):
+    """Sortie du Test Agent : le plan de test et les fichiers de tests ecrits"""
+    cas: list[CasDeTest]
+    fichiers_tests: list[str] = []
+
 class SortieDev(BaseModel):
     """Sortie de l'Agent 3 (Developer)"""
     fichiers_generes: list[str]

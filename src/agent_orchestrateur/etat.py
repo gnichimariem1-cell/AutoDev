@@ -38,6 +38,8 @@ class EtatPipeline(TypedDict, total=False):
     tentative_backend: int
     tentative_frontend: int
     tentative_docker: int
+    # Plus grand nombre de tests backend vu : le nombre ne doit jamais diminuer
+    nb_tests_backend: int
 
     # Resultat : succes, et en cas d'echec l'etape ou le pipeline s'est arrete :
     # - echec de QA apres MAX_TENTATIVES : "backend", "frontend" ou "docker"

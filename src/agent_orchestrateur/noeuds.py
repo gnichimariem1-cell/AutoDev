@@ -103,10 +103,19 @@ def noeud_qa_backend(etat: EtatPipeline) -> dict:
     tentative = etat.get("tentative_backend", 0) + 1
     logger.info("[4/8] QA Agent backend : tentative %d/%d", tentative, MAX_TENTATIVES)
     rapport = lancer_tests(etat["dossier_backend"])
+    # Garde-fou : une correction ne doit pas "reussir" en supprimant des tests
+    nb_tests = rapport.tests_passes + rapport.tests_echoues
+    nb_precedent = etat.get("nb_tests_backend", 0)
+    if nb_tests < nb_precedent:
+        logger.warning("[4/8] QA Agent backend : le nombre de tests a diminue (%d -> %d)", nb_precedent, nb_tests)
+        rapport = rapport.model_copy(update={"succes": False, "erreurs": rapport.erreurs + [
+            f"Le nombre de tests a diminue ({nb_precedent} -> {nb_tests}) : remets les tests supprimes "
+            "et corrige le code de l'application, pas les tests."]})
     if rapport.succes:
         logger.info("[4/8] QA Agent backend : OK (%d tests passes, couverture %.1f%%)",
                     rapport.tests_passes, rapport.couverture_pct)
-    return {"rapport_backend": rapport, "tentative_backend": tentative, "etape": "backend"}
+    return {"rapport_backend": rapport, "tentative_backend": tentative, "etape": "backend",
+            "nb_tests_backend": max(nb_tests, nb_precedent)}
 
 
 @_proteger("correction_backend")

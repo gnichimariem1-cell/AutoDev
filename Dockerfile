@@ -7,7 +7,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @anthropic-ai/claude-code
-
+# Client Docker + Compose : permet au Docker Validation Agent de tester la
+# configuration generee (necessite le socket Docker, voir docker-compose.validation.yml)
+COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker:27-cli /usr/local/libexec/docker/cli-plugins /usr/local/libexec/docker/cli-plugins
 WORKDIR /app
 
 COPY requirements.txt .

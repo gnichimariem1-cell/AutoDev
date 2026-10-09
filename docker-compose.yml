@@ -7,19 +7,19 @@ services:
       - .env
     environment:
       # Dans le conteneur, "localhost" designe le conteneur lui-meme : on joint
-      # l'Ollama de la machine hote via host.docker.internal. Cette valeur remplace
-      # OLLAMA_URL de .env (qui reste valable pour un lancement sans Docker).
-      # Si Ollama tourne ailleurs, definir OLLAMA_URL_DOCKER dans .env.
+      # l'Ollama de la machine hote via host.docker.internal.
       OLLAMA_URL: ${OLLAMA_URL_DOCKER:-http://host.docker.internal:11434/api/generate}
+      # Connexion Claude propre au conteneur (compte Claude), gardee dans un volume.
+      CLAUDE_CONFIG_DIR: /claude-config
+      DISABLE_AUTOUPDATER: "1"
     extra_hosts:
-      # Permet au conteneur de resoudre host.docker.internal (Linux inclus).
       - "host.docker.internal:host-gateway"
     volumes:
       # Code + sorties (output/, logs/, checkpoints/) partages avec l'hote.
       - .:/app
-      # Optionnel : utiliser une session Claude Code deja connectee sur l'hote au
-      # lieu de ANTHROPIC_API_KEY. A decommenter seulement si ces fichiers existent
-      # (sinon Docker cree des dossiers vides a leur place).
-      # - ~/.claude:/root/.claude:ro
-      # - ~/.claude.json:/root/.claude.json:ro
+      # Connexion Claude du conteneur : conservee entre les redemarrages.
+      - claude-config:/claude-config
     restart: unless-stopped
+
+volumes:
+  claude-config:

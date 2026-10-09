@@ -14,6 +14,7 @@ import gradio as gr
 from src.common.schemas import BesoinUtilisateur
 from src.agent_orchestrateur.orchestrateur import (
     executer_pipeline_en_direct, reprendre_pipeline_en_direct, point_de_reprise, RepriseImpossible,
+    rejouer_pipeline_en_direct, point_de_rejeu, ETAPES_REJOUABLES,
 )
 
 LONGUEUR_MAX_DESCRIPTION = 1000
@@ -416,6 +417,30 @@ def reprendre_pipeline(id_run, sections_choisies):
     )
 
 
+def rejouer_pipeline(id_run, etape, sections_choisies):
+    """Rejoue un run deja termine a partir de l'etape choisie, apres une
+    modification d'un agent : les etapes precedentes sont reprises des
+    sauvegardes (pas refaites, pas repayees)."""
+    id_run = (id_run or "").strip()
+    noeud = ETAPES_REJOUABLES.get(etape)
+    if not noeud:
+        yield "⚠️ Choisis l'etape a partir de laquelle rejouer.", gr.update(), gr.update(), *_boutons(True), id_run
+        return
+    try:
+        point_de_rejeu(id_run, noeud)
+    except RepriseImpossible as e:
+        yield f"⚠️ Rejeu impossible : {e}", gr.update(), gr.update(), *_boutons(True), id_run
+        return
+    run = _demarrer_run(rejouer_pipeline_en_direct(id_run, noeud), id_run)
+    if run is None:
+        yield _message_run_deja_en_cours()
+        return
+    yield from _suivre_dans_la_vue(
+        run, sections_choisies,
+        (f"⏳ Rejeu du run {id_run} a partir de l'etape {etape}...", gr.update(), gr.update(), *_boutons(False), id_run),
+    )
+
+
 def suivre_run_actif(sections_choisies):
     """A l'ouverture (ou au rechargement) de la page : se rattache au run en
     cours, ou affiche le resultat du dernier run, avec son ID pre-rempli."""
@@ -460,6 +485,15 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
                     scale=3,
                 )
                 bouton_reprendre = gr.Button("Reprendre", scale=1)
+            with gr.Row():
+                etape_rejeu = gr.Dropdown(
+                    choices=list(ETAPES_REJOUABLES), value=None,
+                    label="Rejouer a partir de",
+                    info="Apres une modification d'un agent : choisis cet agent. Les etapes "
+                         "precedentes du run sont reutilisees, celle-ci et les suivantes sont refaites.",
+                    scale=3,
+                )
+                bouton_rejouer = gr.Button("Rejouer", scale=1)
 
         with gr.Column():
             sections_choisies = gr.CheckboxGroup(
@@ -485,6 +519,12 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
     bouton_reprendre.click(
         fn=reprendre_pipeline,
         inputs=[id_run, sections_choisies],
+        outputs=sorties_run,
+        concurrency_limit=None,
+    )
+    bouton_rejouer.click(
+        fn=rejouer_pipeline,
+        inputs=[id_run, etape_rejeu, sections_choisies],
         outputs=sorties_run,
         concurrency_limit=None,
     )

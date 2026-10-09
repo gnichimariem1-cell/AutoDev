@@ -175,3 +175,50 @@ def reprendre_pipeline_en_direct(id_run: str):
         )
     config = dict(sauvegarde.config, recursion_limit=LIMITE_RECURSION)
     yield from _suivre(None, config, dict(sauvegarde.values))
+
+
+# Etapes que l'on peut rejouer, dans l'ordre du pipeline : libelle -> noeud du graphe
+ETAPES_REJOUABLES = {
+    "Product Owner": "po",
+    "Architect": "architect",
+    "Test Agent": "test_agent",
+    "Developer": "developer",
+    "QA backend": "qa_backend",
+    "Frontend": "frontend",
+    "QA frontend": "qa_frontend",
+    "Dockerization": "dockerization",
+    "Validation Docker": "validation_docker",
+}
+
+
+def point_de_rejeu(id_run: str, etape: str):
+    """Renvoie la sauvegarde prise juste AVANT la premiere execution de l'etape
+    (noeud du graphe) dans le run id_run : tout ce qui precede est reutilise,
+    l'etape et la suite sont refaites. Leve RepriseImpossible si le run est
+    inconnu, si l'etape n'a jamais ete atteinte, ou si les fichiers du run ont
+    ete archives par un run plus recent (on ne melange pas deux projets)."""
+    config = {"configurable": {"thread_id": id_run}}
+    if not GRAPHE.get_state(config).values:
+        raise RepriseImpossible(f"Aucun run '{id_run}' dans les sauvegardes.")
+    trouvee = None
+    for sauvegarde in GRAPHE.get_state_history(config):  # de la plus recente a la plus ancienne
+        if sauvegarde.next == (etape,):
+            trouvee = sauvegarde
+    if trouvee is None:
+        raise RepriseImpossible(f"Le run '{id_run}' n'a jamais atteint l'etape '{etape}' : rien a rejouer.")
+    marqueur = Path(trouvee.values["dossier_docker"]) / FICHIER_ID_RUN
+    if marqueur.exists() and marqueur.read_text().strip() != id_run:
+        raise RepriseImpossible(
+            f"Les fichiers de '{id_run}' ont ete archives dans {DOSSIER_ARCHIVES}/{id_run}/ par le run "
+            f"'{marqueur.read_text().strip()}' : relancer le pipeline avec Lancer.")
+    return trouvee
+
+
+def rejouer_pipeline_en_direct(id_run: str, etape: str):
+    """Rejoue le run id_run a partir de l'etape (noeud du graphe) ; meme format de
+    sortie que executer_pipeline_en_direct(). Les sauvegardes d'origine restent :
+    LangGraph cree une nouvelle branche a partir de la sauvegarde choisie."""
+    sauvegarde = point_de_rejeu(id_run, etape)
+    logger.info("=== Rejeu du run '%s' a partir de l'etape %s ===", id_run, etape)
+    config = dict(sauvegarde.config, recursion_limit=LIMITE_RECURSION)
+    yield from _suivre(None, config, dict(sauvegarde.values))

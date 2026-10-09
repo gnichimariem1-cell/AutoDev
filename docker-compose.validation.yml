@@ -1,0 +1,12 @@
+# Option : active le Docker Validation Agent quand AutoDev tourne dans Docker.
+# Donne au conteneur l'acces au Docker du PC (socket) : a utiliser seulement
+# quand on veut la validation automatique.
+#   docker compose -f docker-compose.yml -f docker-compose.validation.yml up -d
+services:
+  autodev:
+    environment:
+      # Les ports des conteneurs de validation sont publies sur le PC,
+      # que le conteneur AutoDev joint via host.docker.internal.
+      DOCKER_VALIDATION_HOST: host.docker.internal
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

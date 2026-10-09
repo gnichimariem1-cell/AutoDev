@@ -86,3 +86,32 @@ def test_restaurer_tests_ne_touche_rien_si_intacts(tmp_path):
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_a.py").write_text("assert True")
     assert restaurer_tests(str(tmp_path), lire_tests(str(tmp_path))) == []
+
+# --- Etape 2 : le Test Agent dans le pipeline ---
+
+def test_test_agent_entre_architect_et_developer(agents):
+    from src.agent_orchestrateur.orchestrateur import executer_pipeline_en_direct
+    from tests.sorties import BESOIN
+    noeuds = [noeud for noeud, _ in executer_pipeline_en_direct(BESOIN)]
+    assert noeuds[:4] == ["po", "architect", "test_agent", "developer"]
+
+
+def test_plantage_du_test_agent(agents):
+    from src.agent_orchestrateur.orchestrateur import executer_pipeline
+    from tests.sorties import BESOIN
+    agents.generer_plan_et_tests.side_effect = RuntimeError("credit Claude epuise")
+
+    resultat = executer_pipeline(BESOIN)
+
+    assert resultat["succes"] is False
+    assert resultat["etape"] == "test_agent"
+    agents.generer_code.assert_not_called()
+
+
+def test_rapport_affiche_le_test_agent(agents):
+    from src.agent_form.app import construire_rapport_detaille
+    from src.agent_orchestrateur.orchestrateur import executer_pipeline
+    from tests.sorties import BESOIN
+    rapport = construire_rapport_detaille(executer_pipeline(BESOIN))
+    assert "2b. Test Agent — OK" in rapport
+    assert "T01 POST /tasks -> 201" in rapport

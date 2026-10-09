@@ -53,13 +53,13 @@ def test_structure_du_graphe():
     # Chaque noeud d'agent peut aller vers echec en cas de plantage
     plantages = {
         (n, "echec") for n in [
-            "po", "architect", "developer", "correction_backend", "frontend",
+            "po", "architect", "test_agent", "developer", "correction_backend", "frontend",
             "correction_frontend", "dockerization", "correction_docker",
         ]
     }
     assert {
-        ("__start__", "po"), ("po", "architect"), ("architect", "developer"),
-        ("developer", "qa_backend"),
+        ("__start__", "po"), ("po", "architect"), ("architect", "test_agent"),
+        ("test_agent", "developer"), ("developer", "qa_backend"),
         ("qa_backend", "frontend"), ("qa_backend", "correction_backend"), ("qa_backend", "echec"),
         ("correction_backend", "qa_backend"),
         ("frontend", "qa_frontend"),
@@ -92,7 +92,7 @@ def test_pire_cas_reste_sous_la_limite_de_recursion(agents):
     assert resultat["tentative_backend"] == MAX_TENTATIVES
     assert resultat["tentative_frontend"] == MAX_TENTATIVES
     assert resultat["tentative_docker"] == MAX_TENTATIVES
-    noeuds_executes = 6 + 3 * (2 * MAX_TENTATIVES - 1)
+    noeuds_executes = 7 + 3 * (2 * MAX_TENTATIVES - 1)
     assert noeuds_executes < LIMITE_RECURSION
 
 
@@ -131,7 +131,7 @@ def test_execution_en_direct_suit_les_noeuds(agents):
     evenements = [(noeud, dict(etat)) for noeud, etat in executer_pipeline_en_direct(BESOIN)]
 
     assert [noeud for noeud, _ in evenements] == [
-        "po", "architect", "developer", "qa_backend", "correction_backend", "qa_backend",
+        "po", "architect", "test_agent", "developer", "qa_backend", "correction_backend", "qa_backend",
         "frontend", "qa_frontend", "dockerization", "validation_docker",
     ]
     # l'etat s'enrichit au fil des noeuds

@@ -85,6 +85,19 @@ def _section_architect(resultat) -> str:
     )
 
 
+def _section_test_agent(resultat) -> str:
+    plan = resultat.get("plan_tests")
+    if not plan:
+        return "2b. Test Agent\n   (non atteint)\n"
+    cas = [f"   - {c.id} {c.methode} {c.route} -> {c.code_attendu} : {c.scenario}" for c in plan.cas]
+    revision = "   Tests revises une fois apres l'echec des corrections\n" if resultat.get("tests_revises") else ""
+    return (
+        "2b. Test Agent — OK (tests ecrits avant le code)\n"
+        f"   {len(plan.cas)} cas de test, {len(plan.fichiers_tests)} fichiers de tests\n"
+        + "\n".join(cas) + "\n" + revision
+    )
+
+
 def _section_developer(resultat) -> str:
     sortie_dev = resultat.get("sortie_dev")
     if not sortie_dev:
@@ -170,6 +183,7 @@ def _section_validation_docker(resultat) -> str:
 SECTIONS = {
     "Product Owner": _section_product_owner,
     "Architect": _section_architect,
+    "Test Agent": _section_test_agent,
     "Developer": _section_developer,
     "QA Backend": _section_qa_backend,
     "Frontend": _section_frontend,
@@ -184,6 +198,7 @@ TOUTES_LES_SECTIONS = list(SECTIONS.keys())
 LIBELLES_NOEUDS = {
     "po": "Product Owner Agent",
     "architect": "Architect Agent",
+    "test_agent": "Test Agent",
     "developer": "Developer Agent",
     "qa_backend": "QA Agent (backend)",
     "correction_backend": "Correction du backend",

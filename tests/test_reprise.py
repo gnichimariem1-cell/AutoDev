@@ -55,12 +55,12 @@ def test_reprise_apres_arret_de_l_application_en_plein_run(agents):
         if noeud == "architect":
             id_run = etat["id_run"]
             break
-    run.close()  # simule la fermeture de l'application avant le Developer
+    run.close()  # simule la fermeture de l'application avant le Test Agent
 
-    assert point_de_reprise(id_run).next == ("developer",)
+    assert point_de_reprise(id_run).next == ("test_agent",)
     evenements = _reprendre(id_run)
 
-    assert evenements[0][0] == "developer"
+    assert evenements[0][0] == "test_agent"
     assert evenements[-1][1]["succes"] is True
     agents.generer_user_stories.assert_called_once()
 

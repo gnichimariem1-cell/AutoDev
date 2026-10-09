@@ -11,6 +11,7 @@ from typing import TypedDict
 from src.common.schemas import (
     BesoinUtilisateur, SortiePO, SortieArchitecte, SortieDev, RapportQA,
     SortieFrontend, RapportQAFrontend, SortieDockerization, RapportValidationDocker,
+    SortieTestAgent,
 )
 
 MAX_TENTATIVES = int(os.environ.get("MAX_TENTATIVES", 3))
@@ -27,6 +28,11 @@ class EtatPipeline(TypedDict, total=False):
     # Sorties des agents
     user_stories: SortiePO
     architecture: SortieArchitecte
+    plan_tests: SortieTestAgent
+    # Contenu des tests ecrits par le Test Agent : tout changement par un autre agent est annule
+    tests_originaux: dict[str, str]
+    # Le Test Agent a deja revise ses tests une fois (apres l'echec de toutes les corrections)
+    tests_revises: bool
     sortie_dev: SortieDev
     rapport_backend: RapportQA
     sortie_frontend: SortieFrontend

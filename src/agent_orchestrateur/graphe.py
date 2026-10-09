@@ -1,6 +1,6 @@
 """Assemblage du graphe LangGraph du pipeline :
 
-START -> po -> architect -> developer -> qa_backend -> frontend -> qa_frontend
+START -> po -> architect -> test_agent -> developer -> qa_backend -> frontend -> qa_frontend
       -> dockerization -> validation_docker -> END
 
 Chaque QA a trois sorties (voir routage.py) : "ok" vers l'etape suivante,
@@ -21,11 +21,11 @@ from src.agent_orchestrateur.routage import (
     continuer_ou_abandonner, router_qa_backend, router_qa_frontend, router_validation_docker,
 )
 
-# Nombre de noeuds executes dans le pire cas : po, architect, developer,
-# frontend, dockerization, echec (6) + pour chacune des 3 boucles, MAX_TENTATIVES
+# Nombre de noeuds executes dans le pire cas : po, architect, test_agent,
+# developer, frontend, dockerization, echec (7) + pour chacune des 3 boucles, MAX_TENTATIVES
 # QA et MAX_TENTATIVES - 1 corrections. LangGraph s'arrete par defaut a 25 pas,
 # ce qui serait depasse des MAX_TENTATIVES=4 : on calcule donc la limite.
-LIMITE_RECURSION = 6 + 3 * (2 * MAX_TENTATIVES - 1) + 5
+LIMITE_RECURSION = 7 + 3 * (2 * MAX_TENTATIVES - 1) + 5
 
 FICHIER_SCHEMA = Path("docs/pipeline.md")
 
@@ -35,6 +35,7 @@ def construire_graphe(checkpointer=None):
 
     graphe.add_node("po", noeuds.noeud_po)
     graphe.add_node("architect", noeuds.noeud_architect)
+    graphe.add_node("test_agent", noeuds.noeud_test_agent)
     graphe.add_node("developer", noeuds.noeud_developer)
     graphe.add_node("qa_backend", noeuds.noeud_qa_backend)
     graphe.add_node("correction_backend", noeuds.noeud_correction_backend)
@@ -53,7 +54,8 @@ def construire_graphe(checkpointer=None):
 
     graphe.add_edge(START, "po")
     enchainer("po", "architect")
-    enchainer("architect", "developer")
+    enchainer("architect", "test_agent")
+    enchainer("test_agent", "developer")
     enchainer("developer", "qa_backend")
 
     graphe.add_conditional_edges("qa_backend", router_qa_backend, {

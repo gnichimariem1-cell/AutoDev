@@ -64,15 +64,12 @@ def lancer_tests(dossier_code: str) -> RapportQA:
     with open("rapport_pytest.json") as f:
         rapport = json.load(f)
 
-    if not os.path.exists("coverage.json"):
-        raise RuntimeError(
-            "pytest-cov n'a pas produit coverage.json.\n"
-            f"stdout : {resultat.stdout[-2000:]}\n"
-            f"stderr : {resultat.stderr[-2000:]}"
-        )
-
-    with open("coverage.json") as f:
-        couverture = json.load(f)
+    # Pas de coverage.json quand pytest s'interrompt (ex : erreur de collecte) :
+    # couverture 0 et les erreurs ci-dessous sont renvoyees pour correction.
+    couverture_pct = 0.0
+    if os.path.exists("coverage.json"):
+        with open("coverage.json") as f:
+            couverture_pct = json.load(f)["totals"]["percent_covered"]
 
     tests_passes = rapport["summary"].get("passed", 0)
     # "error" : echec pendant le setup/teardown d'un test (ex : fixture qui plante)
@@ -85,6 +82,11 @@ def lancer_tests(dossier_code: str) -> RapportQA:
         f"Erreur de collecte {c['nodeid']} : {c.get('longrepr', '')[-1000:]}"
         for c in rapport.get("collectors", []) if c["outcome"] == "failed"
     ]
+    if not os.path.exists("coverage.json") and not erreurs:
+        erreurs.append(
+            "pytest s'est interrompu sans mesurer la couverture.\n"
+            f"stdout : {resultat.stdout[-2000:]}"
+        )
     if rapport["summary"].get("total", tests_passes + tests_echoues) == 0:
         erreurs.append(
             f"Aucun test pytest trouve dans {dossier_code} : ecris des tests (dossier tests/, "
@@ -94,7 +96,7 @@ def lancer_tests(dossier_code: str) -> RapportQA:
     return RapportQA(
         tests_passes=tests_passes,
         tests_echoues=tests_echoues,
-        couverture_pct=couverture["totals"]["percent_covered"],
+        couverture_pct=couverture_pct,
         succes=(len(erreurs) == 0),
         erreurs=erreurs,
     )

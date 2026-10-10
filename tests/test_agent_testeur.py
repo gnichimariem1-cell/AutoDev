@@ -170,3 +170,17 @@ def test_revision_des_tests_puis_succes(agents):
     assert resultat["succes"] is True
     agents.reviser_tests.assert_called_once()
     assert resultat["tests_revises"] is True
+
+
+@patch("src.agent_test.testeur.subprocess.run")
+def test_anciens_tests_supprimes_avant_le_nouveau_plan(mock_run, tmp_path):
+    """Apres un Rejouer : les tests de l'ancien plan ne doivent pas rester."""
+    ancien = tmp_path / "tests" / "test_messages.py"
+    ancien.parent.mkdir(parents=True)
+    ancien.write_text("from conftest import OLLAMA_REPLY\n")
+    mock_run.side_effect = _claude_qui_ecrit_un_test(tmp_path, PLAN_JSON)
+
+    plan = generer_plan_et_tests(USER_STORIES, str(tmp_path))
+
+    assert not ancien.exists()
+    assert [Path(f).name for f in plan.fichiers_tests] == ["test_taches.py"]

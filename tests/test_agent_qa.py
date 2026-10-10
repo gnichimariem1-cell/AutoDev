@@ -108,3 +108,25 @@ def test_lancer_tests_frontend_detecte_erreur_syntaxe_js(mock_run, mock_which, t
     rapport = lancer_tests_frontend(str(tmp_path))
     assert rapport.succes is False
     assert any("SyntaxError" in e for e in rapport.erreurs)
+
+
+@patch("src.agent_qa.qa.subprocess.run")
+def test_erreur_de_collecte_sans_coverage_est_un_echec(mock_run, tmp_path, monkeypatch):
+    """pytest interrompu par une erreur de collecte : ECHEC corrigeable, pas PLANTAGE."""
+    monkeypatch.chdir(tmp_path)
+
+    def pytest_interrompu(commande, **kwargs):
+        if commande[0] == "pytest":
+            (tmp_path / "rapport_pytest.json").write_text(json.dumps({
+                "summary": {"error": 1, "total": 0, "collected": 0},
+                "tests": [],
+                "collectors": [{"nodeid": "tests/test_messages.py", "outcome": "failed",
+                                "longrepr": "ImportError: cannot import name 'OLLAMA_REPLY'"}],
+            }))
+        return MagicMock(returncode=2, stdout="Interrupted: 1 error during collection", stderr="")
+
+    mock_run.side_effect = pytest_interrompu
+    rapport = lancer_tests("backend")
+    assert rapport.succes is False
+    assert rapport.couverture_pct == 0.0
+    assert any("OLLAMA_REPLY" in e for e in rapport.erreurs)

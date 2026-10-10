@@ -4,7 +4,7 @@ import os
 import re
 import unicodedata
 import requests
-from src.common.schemas import BesoinUtilisateur, SortiePO
+from src.common.schemas import BesoinUtilisateur, SortiePO, UserStory
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")
 MODEL = os.environ.get("OLLAMA_MODEL", "qwen3")
@@ -64,9 +64,8 @@ def _normaliser_cles(obj):
     return obj
 
 
-def generer_user_stories(besoin: BesoinUtilisateur) -> SortiePO:
-    prompt = PROMPT_TEMPLATE.format(besoin_json=besoin.model_dump_json(indent=2))
-
+def _demander(prompt: str) -> SortiePO:
+    """Envoie la consigne a Ollama et renvoie les user stories validees."""
     response = requests.post(OLLAMA_URL, json={
         "model": MODEL,
         "prompt": prompt,
@@ -98,3 +97,72 @@ def generer_user_stories(besoin: BesoinUtilisateur) -> SortiePO:
 
     donnees_normalisees = _normaliser_cles(donnees_brutes)
     return SortiePO.model_validate(donnees_normalisees)
+
+
+# --- Verification : chaque fonctionnalite du formulaire a sa user story ---
+
+MOTS_VIDES = {"le", "la", "les", "un", "une", "des", "de", "du", "se", "son", "sa", "ses",
+              "mon", "ma", "mes", "et", "ou", "au", "aux", "en", "pour", "par", "sur",
+              "avec", "dans", "the", "and", "to", "of"}
+
+CONSIGNE_COMPLEMENT = """
+
+ATTENTION : ta reponse precedente a oublie ces fonctionnalites demandees : {oubliees}.
+Reponds a nouveau avec TOUTES les user stories : celles de ta reponse precedente
+ET une user story pour chaque fonctionnalite oubliee (avec ses criteres d'acceptation).
+Ta reponse precedente :
+{precedente}
+"""
+
+
+def _racines(texte: str) -> set[str]:
+    """Debuts de mots significatifs (4 lettres) : « deconnecter » et « deconnexion » -> « deco »."""
+    mots = _cle_simplifiee_mots(texte)
+    return {m[:4] for m in mots if len(m) >= 3 and m not in MOTS_VIDES}
+
+
+def _cle_simplifiee_mots(texte: str) -> list[str]:
+    sans_accents = "".join(
+        c for c in unicodedata.normalize("NFKD", texte) if not unicodedata.combining(c)
+    )
+    return re.findall(r"[a-z]+", sans_accents.lower())
+
+
+def fonctionnalites_manquantes(fonctionnalites: list[str], sortie: SortiePO) -> list[str]:
+    """Fonctionnalites du formulaire qui n'apparaissent dans aucune user story."""
+    textes = [_racines(" ".join([us.titre, us.description, *us.criteres_acceptation]))
+              for us in sortie.user_stories]
+    manquantes = []
+    for fonctionnalite in fonctionnalites:
+        racines = _racines(fonctionnalite)
+        if racines and not any(racines <= texte for texte in textes):
+            manquantes.append(fonctionnalite)
+    return manquantes
+
+
+def _completer(sortie: SortiePO, manquantes: list[str]) -> SortiePO:
+    """Dernier recours : une user story simple pour chaque fonctionnalite encore oubliee."""
+    stories = list(sortie.user_stories)
+    for fonctionnalite in manquantes:
+        stories.append(UserStory(
+            id=f"US{len(stories) + 1}",
+            titre=fonctionnalite[:1].upper() + fonctionnalite[1:],
+            description=f"L'utilisateur doit pouvoir : {fonctionnalite}.",
+            criteres_acceptation=[f"La fonctionnalite « {fonctionnalite} » est disponible et fonctionne"],
+            priorite="moyenne",
+        ))
+    return SortiePO(user_stories=stories)
+
+
+def generer_user_stories(besoin: BesoinUtilisateur) -> SortiePO:
+    prompt = PROMPT_TEMPLATE.format(besoin_json=besoin.model_dump_json(indent=2))
+    sortie = _demander(prompt)
+
+    manquantes = fonctionnalites_manquantes(besoin.fonctionnalites_cles, sortie)
+    if manquantes:
+        sortie = _demander(prompt + CONSIGNE_COMPLEMENT.format(
+            oubliees=", ".join(manquantes), precedente=sortie.model_dump_json(indent=2)))
+        manquantes = fonctionnalites_manquantes(besoin.fonctionnalites_cles, sortie)
+        if manquantes:
+            sortie = _completer(sortie, manquantes)
+    return sortie

@@ -97,7 +97,12 @@ def generer_plan_et_tests(user_stories: SortiePO, dossier_backend: str = "output
                           fichier_plan: str | None = None) -> SortieTestAgent:
     """Ecrit le plan de test et les tests pytest dans <dossier_backend>/tests/,
     avant que le Developer n'ecrive le code."""
-    Path(dossier_backend, "tests").mkdir(parents=True, exist_ok=True)
+    # Repart d'un dossier tests/ vide : apres un Rejouer, les tests de l'ancien plan
+    # resteraient sinon a cote des nouveaux et casseraient la collecte pytest.
+    dossier_tests = Path(dossier_backend, "tests")
+    if dossier_tests.exists():
+        shutil.rmtree(dossier_tests)
+    dossier_tests.mkdir(parents=True, exist_ok=True)
     bloc_architecture = ""
     if architecture:
         bloc_architecture = (

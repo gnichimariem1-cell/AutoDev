@@ -47,3 +47,65 @@ def test_consigne_contient_les_regles_de_priorite(mock_post):
     prompt = mock_post.call_args.kwargs["json"]["prompt"]
     assert "MoSCoW" in prompt
     assert "ne peuvent pas toutes etre" in prompt
+
+
+# --- Chaque fonctionnalite du formulaire doit avoir sa user story ---
+
+def _story(id_, titre, description="d", priorite="haute"):
+    return {"id": id_, "titre": titre, "description": description,
+            "criteres_acceptation": ["c"], "priorite": priorite}
+
+
+def _reponses_ollama(*reponses):
+    return [MagicMock(status_code=200, raise_for_status=lambda: None,
+                      json=(lambda r=r: {"response": json.dumps({"user_stories": r})}))
+            for r in reponses]
+
+
+BESOIN_CHATBOT = BesoinUtilisateur(
+    titre_projet="Chatbot", description="d", utilisateurs_cibles="equipe",
+    fonctionnalites_cles=["se connecter", "se deconnecter", "poser une question"],
+)
+
+
+@patch("src.agent_po.product_owner.requests.post")
+def test_fonctionnalite_oubliee_redemandee(mock_post):
+    mock_post.side_effect = _reponses_ollama(
+        [_story("US1", "Se connecter"), _story("US2", "Poser une question")],
+        [_story("US1", "Se connecter"), _story("US2", "Poser une question"),
+         _story("US3", "Se déconnecter", priorite="moyenne")],
+    )
+    sortie = generer_user_stories(BESOIN_CHATBOT)
+    assert mock_post.call_count == 2
+    assert "se deconnecter" in mock_post.call_args.kwargs["json"]["prompt"]
+    assert [us.titre for us in sortie.user_stories][-1] == "Se déconnecter"
+
+
+@patch("src.agent_po.product_owner.requests.post")
+def test_fonctionnalite_toujours_oubliee_ajoutee_automatiquement(mock_post):
+    oubli = [_story("US1", "Se connecter"), _story("US2", "Poser une question")]
+    mock_post.side_effect = _reponses_ollama(oubli, oubli)
+    sortie = generer_user_stories(BESOIN_CHATBOT)
+    derniere = sortie.user_stories[-1]
+    assert derniere.id == "US3" and derniere.priorite == "moyenne"
+    assert "se deconnecter" in derniere.description
+
+
+@patch("src.agent_po.product_owner.requests.post")
+def test_aucune_redemande_si_tout_est_couvert(mock_post):
+    mock_post.side_effect = _reponses_ollama([
+        _story("US1", "Connexion", "L'utilisateur se connecte avec son compte"),
+        _story("US2", "Déconnexion", "L'utilisateur se déconnecte"),
+        _story("US3", "Poser une question au chatbot"),
+    ])
+    generer_user_stories(BESOIN_CHATBOT)
+    assert mock_post.call_count == 1
+
+
+def test_fonctionnalite_fusionnee_est_couverte():
+    from src.agent_po.product_owner import fonctionnalites_manquantes
+    from src.common.schemas import SortiePO
+    sortie = SortiePO.model_validate({"user_stories": [
+        _story("US1", "Poser une question", "La premiere question cree une conversation")]})
+    assert fonctionnalites_manquantes(["creer une conversation", "supprimer une conversation"], sortie) \
+        == ["supprimer une conversation"]

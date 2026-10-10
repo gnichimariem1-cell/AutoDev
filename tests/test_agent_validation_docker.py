@@ -22,7 +22,7 @@ def ports_libres():
 
 
 def _dossier_docker(tmp_path):
-    (tmp_path / "Dockerfile").write_text("FROM python:3.11-slim")
+    (tmp_path / "Dockerfile").write_text("FROM python:3.11-slim\nUSER app")
     (tmp_path / "docker-compose.yml").write_text("services: {}")
     return str(tmp_path)
 
@@ -64,7 +64,7 @@ def test_validation_reussie_et_nettoyage(mock_compose, mock_http, tmp_path):
 
     assert rapport.succes is True
     assert [e.nom for e in rapport.etapes] == [
-        "fichiers", "config", "ports", "build", "demarrage", "service app", "service frontend",
+        "fichiers", "non-root", "config", "ports", "build", "demarrage", "service app", "service frontend",
     ]
     mock_http.assert_any_call("http://localhost:8000/", validation_docker.DEMARRAGE_TIMEOUT)
     assert faux.call_args_list[-1].args[1][0] == "down"
@@ -104,3 +104,26 @@ def test_port_occupe_est_une_erreur_environnement(mock_compose, ports_libres, tm
     assert rapport.erreur_environnement is True
     assert "8000" in rapport.erreurs[0]
     assert [c.args[1][0] for c in faux.call_args_list] == ["config"]
+
+
+@pytest.mark.parametrize("dockerfile", [
+    "FROM python:3.11-slim\nCMD [\"uvicorn\"]",                      # aucun USER
+    "FROM python:3.11-slim\nUSER root",                               # USER root
+    "FROM python:3.11 AS build\nUSER app\nFROM python:3.11-slim",      # USER seulement dans l'etape de build
+])
+@patch.object(validation_docker, "_commande_compose", return_value=["docker", "compose"])
+def test_sec07_dockerfile_en_root_refuse(mock_compose, tmp_path, dockerfile):
+    (tmp_path / "Dockerfile").write_text(dockerfile)
+    (tmp_path / "docker-compose.yml").write_text("services: {}")
+    faux = _faux_compose()
+    with patch.object(validation_docker, "_executer", faux):
+        rapport = valider_dockerisation(str(tmp_path))
+    assert rapport.succes is False
+    assert rapport.erreur_environnement is False   # erreur de code : corrigee par le Dockerization Agent
+    assert rapport.etapes[-1].nom == "non-root"
+    faux.assert_not_called()                        # rien n'est construit
+
+
+def test_sec07_utilisateur_final():
+    assert validation_docker.utilisateur_final("FROM a\nUSER app\nFROM b\nUSER web") == "web"
+    assert validation_docker.utilisateur_final("FROM a\nRUN x") is None

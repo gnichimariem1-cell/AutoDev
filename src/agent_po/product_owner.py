@@ -15,6 +15,12 @@ les noms de champs, SANS accents ni caracteres speciaux) :
 {{"user_stories": [{{"id": "US1", "titre": "...", "description": "...",
 "criteres_acceptation": ["..."], "priorite": "haute|moyenne|basse"}}]}}
 
+Regles de priorite (methode MoSCoW) :
+- "haute" : indispensable, sans elle l'application ne sert a rien (ex : se connecter, la fonction principale)
+- "moyenne" : importante, mais l'application fonctionne sans elle (ex : historique, profil)
+- "basse" : confort, peut attendre une version suivante (ex : supprimer, trier, exporter)
+S'il y a plus de 3 user stories, elles ne peuvent pas toutes etre "haute" : fais de vrais choix.
+
 IMPORTANT : les noms de champs doivent etre exactement "id", "titre", "description",
 "criteres_acceptation", "priorite" (AUCUN accent, AUCUNE apostrophe dans les noms de champs).
 

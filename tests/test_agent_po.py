@@ -28,3 +28,22 @@ def test_generer_user_stories_parse_reponse_ollama(mock_post):
     requete = mock_post.call_args.kwargs["json"]
     assert requete["format"]["properties"]["user_stories"]["type"] == "array"
     assert requete["think"] is False
+
+
+@patch("src.agent_po.product_owner.requests.post")
+def test_consigne_contient_les_regles_de_priorite(mock_post):
+    reponse = {"user_stories": [{"id": "US1", "titre": "t", "description": "d",
+                                 "criteres_acceptation": ["c"], "priorite": "basse"}]}
+    mock_post.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {"response": json.dumps(reponse)},
+        raise_for_status=lambda: None,
+    )
+    besoin = BesoinUtilisateur(
+        titre_projet="x", description="y", utilisateurs_cibles="z",
+        fonctionnalites_cles=["login", "historique", "supprimer"],
+    )
+    generer_user_stories(besoin)
+    prompt = mock_post.call_args.kwargs["json"]["prompt"]
+    assert "MoSCoW" in prompt
+    assert "ne peuvent pas toutes etre" in prompt

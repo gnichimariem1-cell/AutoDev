@@ -2,6 +2,7 @@
 Dockerization Agent fonctionne reellement, sans IA (verifications deterministes) :
 
 1. fichiers presents (Dockerfile, docker-compose.yml)
+   + le Dockerfile n'execute pas l'application en root (instruction USER)
 2. `docker compose config` : le YAML est valide
    + ports publies libres sur la machine (sinon erreur d'environnement,
    non transmise a Claude : la configuration n'est pas en cause)
@@ -89,6 +90,25 @@ def _attendre_reponse_http(url: str, timeout: int) -> str | None:
     return probleme
 
 
+UTILISATEURS_ROOT = {"root", "0", "0:0", "root:root"}
+
+
+def utilisateur_final(dockerfile: str) -> str | None:
+    """Utilisateur qui execute l'application : derniere instruction USER apres le
+    dernier FROM du Dockerfile. None s'il n'y en a pas (donc root par defaut)."""
+    utilisateur = None
+    for ligne in dockerfile.splitlines():
+        mots = ligne.strip().split()
+        if not mots:
+            continue
+        instruction = mots[0].upper()
+        if instruction == "FROM":
+            utilisateur = None
+        elif instruction == "USER" and len(mots) > 1:
+            utilisateur = mots[1]
+    return utilisateur
+
+
 def valider_dockerisation(dossier: str = "output") -> RapportValidationDocker:
     compose = _commande_compose()
     if compose is None:
@@ -112,6 +132,16 @@ def valider_dockerisation(dossier: str = "output") -> RapportValidationDocker:
     if manquants:
         return echec("fichiers", f"fichiers manquants dans {dossier}/ : {', '.join(manquants)}")
     etapes.append(EtapeValidationDocker(nom="fichiers", succes=True))
+
+    utilisateur = utilisateur_final(
+        (Path(dossier) / "Dockerfile").read_text(encoding="utf-8", errors="replace"))
+    if utilisateur is None or utilisateur in UTILISATEURS_ROOT:
+        return echec(
+            "non-root",
+            "le Dockerfile execute l'application en root. Creer un utilisateur non privilegie "
+            "(ex : RUN useradd -m app) et ajouter `USER app` apres le dernier FROM.",
+        )
+    etapes.append(EtapeValidationDocker(nom="non-root", succes=True, details=f"USER {utilisateur}"))
 
     resultat = _executer(compose, ["config", "--format", "json"], dossier, 60)
     if resultat.returncode != 0:

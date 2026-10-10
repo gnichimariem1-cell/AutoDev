@@ -540,16 +540,26 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
         outputs=[resultat_texte],
     )
 
-if __name__ == "__main__":
+def identifiants_formulaire() -> tuple[str, str] | None:
+    """Identifiant et mot de passe du formulaire (.env), ou None s'ils manquent."""
     utilisateur = os.environ.get("GRADIO_AUTH_USER")
     mot_de_passe = os.environ.get("GRADIO_AUTH_PASSWORD")
-    if utilisateur and mot_de_passe:
-        demo.launch(auth=(utilisateur, mot_de_passe))
-    else:
-        print(
-            "ATTENTION: GRADIO_AUTH_USER / GRADIO_AUTH_PASSWORD non definis dans .env — "
-            "le formulaire est lance SANS authentification. N'importe qui avec l'URL peut "
-            "declencher le pipeline (et consommer tes credits API). Definis ces 2 variables "
-            "dans .env pour proteger l'acces."
-        )
-        demo.launch()
+    return (utilisateur, mot_de_passe) if utilisateur and mot_de_passe else None
+
+
+def lancer_formulaire(**options):
+    """Lance le formulaire, protege par mot de passe si .env le definit."""
+    identifiants = identifiants_formulaire()
+    if identifiants:
+        return demo.launch(auth=identifiants, **options)
+    print(
+        "ATTENTION: GRADIO_AUTH_USER / GRADIO_AUTH_PASSWORD non definis dans .env — "
+        "le formulaire est lance SANS authentification. N'importe qui avec l'URL peut "
+        "declencher le pipeline (et consommer tes credits API). Definis ces 2 variables "
+        "dans .env pour proteger l'acces."
+    )
+    return demo.launch(**options)
+
+
+if __name__ == "__main__":
+    lancer_formulaire()

@@ -12,3 +12,28 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements.txt
       - run: pytest --cov=src --cov-report=term-missing
+
+  secrets:
+    # SEC-05 et SEC-06 : aucun .env ni aucune cle dans le depot, historique compris
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Aucun fichier .env versionne (SEC-05)
+        run: |
+          if git ls-files | grep -E '(^|/)\.env$'; then
+            echo "Un fichier .env est versionne : le retirer avec git rm --cached"; exit 1
+          fi
+      - name: Aucun secret dans l'historique Git (SEC-06, gitleaks)
+        run: |
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar xz gitleaks
+          ./gitleaks git . -v --redact
+
+  docker:
+    # DEP-01 : l'image Docker d'AutoDev se construit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Construction de l'image AutoDev (DEP-01)
+        run: docker build -t autodev-ci .

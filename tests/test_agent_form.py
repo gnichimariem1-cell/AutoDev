@@ -1,4 +1,4 @@
-﻿from src.agent_form.app import collecter_besoin
+from src.agent_form.app import collecter_besoin
 
 def test_collecter_besoin_produit_objet_valide():
     besoin = collecter_besoin(
@@ -140,13 +140,32 @@ def test_un_seul_run_a_la_fois():
     assert "Un run est deja en cours (ID : run-1)" in second[0][0]
 
 
-def test_rechargement_de_la_page_affiche_le_dernier_run():
+def test_rechargement_apres_un_run_termine_onglet_vide():
+    """Run termine : au rechargement, « Run en cours » reste vide (le run est
+    dans « Runs existants »)."""
     etats = [("po", {"id_run": "run-1", "succes": True}), ("architect", {"id_run": "run-1", "succes": True})]
     with patch("src.agent_form.app.executer_pipeline_en_direct", return_value=iter(etats)):
         list(lancer_pipeline_complet("t", "d", "u", "a", "", None))
 
+    import gradio as gr
     sorties = list(app.suivre_run_actif(None))
-    assert sorties[0][0] == "⏳ Reconnexion au run run-1..."
+    assert len(sorties) == 1
+    assert sorties[0][2] == gr.update()  # aucun run affiche dans « Run en cours »
+    assert sorties[0][3]["interactive"] is True
+
+
+def test_rechargement_pendant_un_run_se_rattache():
+    debloquer = threading.Event()
+    etats = [("po", {"id_run": "run-1", "succes": True}), ("architect", {"id_run": "run-1", "succes": True})]
+    with patch("src.agent_form.app.executer_pipeline_en_direct",
+               return_value=_evenements_bloques(etats, debloquer)):
+        premier = lancer_pipeline_complet("t", "d", "u", "a", "", None)
+        next(premier), next(premier)
+        suivi = app.suivre_run_actif(None)
+        assert next(suivi)[0] == "⏳ Reconnexion au run run-1..."
+        debloquer.set()
+        sorties = list(suivi)
+        list(premier)
     assert sorties[-1][0].startswith("✅ SUCCES")
     assert sorties[-1][5] == "run-1"
 

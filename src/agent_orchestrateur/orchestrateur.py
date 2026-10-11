@@ -200,10 +200,18 @@ def point_de_rejeu(id_run: str, etape: str):
     config = {"configurable": {"thread_id": id_run}}
     if not GRAPHE.get_state(config).values:
         raise RepriseImpossible(f"Aucun run '{id_run}' dans les sauvegardes.")
+    # Apres un rejeu, l'historique contient aussi les anciennes branches du run.
+    # On suit donc la lignee du dernier etat, en remontant ses parents : la
+    # derniere sauvegarde trouvee en remontant est la premiere execution de
+    # l'etape dans le rejeu le plus recent.
+    historique = {s.config["configurable"]["checkpoint_id"]: s for s in GRAPHE.get_state_history(config)}
+    courante = GRAPHE.get_state(config)
     trouvee = None
-    for sauvegarde in GRAPHE.get_state_history(config):  # de la plus recente a la plus ancienne
-        if sauvegarde.next == (etape,):
-            trouvee = sauvegarde
+    while courante is not None:
+        if courante.next == (etape,):
+            trouvee = courante
+        parent = courante.parent_config
+        courante = historique.get(parent["configurable"]["checkpoint_id"]) if parent else None
     if trouvee is None:
         raise RepriseImpossible(f"Le run '{id_run}' n'a jamais atteint l'etape '{etape}' : rien a rejouer.")
     marqueur = Path(trouvee.values["dossier_docker"]) / FICHIER_ID_RUN
@@ -222,3 +230,60 @@ def rejouer_pipeline_en_direct(id_run: str, etape: str):
     logger.info("=== Rejeu du run '%s' a partir de l'etape %s ===", id_run, etape)
     config = dict(sauvegarde.config, recursion_limit=LIMITE_RECURSION)
     yield from _suivre(None, config, dict(sauvegarde.values))
+
+
+# --- Historique des runs (onglet « Runs existants » de la Vue) ---
+
+def _date_du_run(id_run: str) -> str:
+    """Date lisible tiree de l'ID (ex : ...-20261010-133753-... -> 10/10/2026 13:37)."""
+    m = re.search(r"(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})\d{2}", id_run)
+    return f"{m[3]}/{m[2]}/{m[1]} {m[4]}:{m[5]}" if m else ""
+
+
+def etat_du_run(id_run: str) -> dict:
+    """Dernier etat sauvegarde du run (vide s'il est inconnu)."""
+    return dict(GRAPHE.get_state({"configurable": {"thread_id": id_run}}).values or {})
+
+
+def historique_runs(limite: int = 30) -> list[dict]:
+    """Les runs sauvegardes, du plus recent au plus ancien. Pour chacun :
+    id_run, titre, date, statut (SUCCES, ECHEC, PLANTAGE, INTERROMPU),
+    etape (ou il s'est arrete), archive (fichiers deplaces par un run plus recent)."""
+    saver = GRAPHE.checkpointer
+    if hasattr(saver, "setup"):
+        saver.setup()  # cree les tables si aucun run n'a encore ete sauvegarde
+    with getattr(saver, "lock", None) or _verrou_factice():
+        lignes = saver.conn.execute(
+            "SELECT thread_id, MAX(checkpoint_id) AS dernier FROM checkpoints "
+            "GROUP BY thread_id ORDER BY dernier DESC LIMIT ?", (limite,)).fetchall()
+    runs = []
+    for id_run, _ in lignes:
+        snapshot = GRAPHE.get_state({"configurable": {"thread_id": id_run}})
+        valeurs = snapshot.values or {}
+        if not valeurs:
+            continue
+        if valeurs.get("erreur"):
+            statut, etape = "PLANTAGE", valeurs.get("etape", "")
+        elif snapshot.next:
+            statut, etape = "INTERROMPU", snapshot.next[0]
+        elif valeurs.get("succes"):
+            statut, etape = "SUCCES", ""
+        else:
+            statut, etape = "ECHEC", valeurs.get("etape", "")
+            validation = valeurs.get("rapport_validation_docker")
+            if etape == "docker" and validation is not None and getattr(validation, "erreur_environnement", False):
+                etape = "docker (machine)"
+        marqueur = Path(valeurs.get("dossier_docker", "output")) / FICHIER_ID_RUN
+        archive = marqueur.exists() and marqueur.read_text().strip() != id_run
+        besoin = valeurs.get("besoin")
+        runs.append({"id_run": id_run, "titre": besoin.titre_projet if besoin else id_run,
+                     "date": _date_du_run(id_run), "statut": statut, "etape": etape, "archive": archive})
+    return runs
+
+
+class _verrou_factice:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False

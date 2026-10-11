@@ -86,3 +86,19 @@ def test_bouton_rejouer_dans_la_page(agents):
 
     assert "Rejeu du run" in sorties[0][0]
     assert "SUCCES" in sorties[-1][0]
+
+
+def test_rejouer_apres_un_rejeu_part_du_plus_recent(agents):
+    """Rejouer le Product Owner (nouvelles user stories), puis rejouer la
+    validation Docker : on doit garder les NOUVELLES user stories."""
+    from src.common.schemas import SortiePO, UserStory
+    resultat = executer_pipeline(BESOIN)
+    nouvelles = SortiePO(user_stories=[UserStory(
+        id="US1", titre="Se deconnecter", description="d", criteres_acceptation=["c"], priorite="moyenne")])
+    agents.generer_user_stories.return_value = nouvelles
+    _rejouer(resultat["id_run"], "po")
+
+    evenements = _rejouer(resultat["id_run"], "validation_docker")
+
+    assert [noeud for noeud, _ in evenements] == ["validation_docker"]
+    assert evenements[-1][1]["user_stories"] == nouvelles

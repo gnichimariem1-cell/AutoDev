@@ -24,7 +24,9 @@ from src.agent_dev.developer import generer_code, appliquer_corrections
 from src.agent_test.testeur import generer_plan_et_tests, reviser_tests, lire_tests, restaurer_tests
 from src.agent_frontend.frontend import generer_frontend, appliquer_corrections_frontend
 from src.agent_qa.qa import lancer_tests, lancer_tests_frontend
-from src.agent_dockerization.dockerization import generer_dockerisation, appliquer_corrections_dockerisation
+from src.agent_dockerization.dockerization import (
+    generer_dockerisation, appliquer_corrections_dockerisation, nommer_projet_compose,
+)
 from src.agent_validation_docker.validation_docker import valider_dockerisation
 from src.agent_orchestrateur.etat import EtatPipeline, MAX_TENTATIVES
 
@@ -184,6 +186,7 @@ def noeud_correction_frontend(etat: EtatPipeline) -> dict:
 def noeud_dockerization(etat: EtatPipeline) -> dict:
     logger.info("[8/9] Dockerization Agent : demarrage")
     rapport = generer_dockerisation(etat["dossier_backend"], etat["dossier_frontend"], etat["dossier_docker"])
+    nommer_projet_compose(etat["dossier_docker"], etat["id_run"])
     logger.info("[8/9] Dockerization Agent : OK (%d fichiers generes)", len(rapport.fichiers_generes))
     return {"rapport_dockerisation": rapport}
 
@@ -205,7 +208,9 @@ def noeud_correction_docker(etat: EtatPipeline) -> dict:
     rapport = etat["rapport_validation_docker"]
     logger.warning("[9/9] Docker Validation Agent : echec tentative %d — correction en cours — %s",
                    etat["tentative_docker"], rapport.erreurs)
-    return {"rapport_dockerisation": appliquer_corrections_dockerisation(rapport.erreurs, etat["dossier_docker"])}
+    sortie = appliquer_corrections_dockerisation(rapport.erreurs, etat["dossier_docker"])
+    nommer_projet_compose(etat["dossier_docker"], etat["id_run"])
+    return {"rapport_dockerisation": sortie}
 
 
 # Pour chaque etape pouvant echouer : (cle du rapport, cle du compteur)

@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.agent_dockerization.dockerization import generer_dockerisation
+from src.agent_dockerization.dockerization import generer_dockerisation, nommer_projet_compose
 from src.common.schemas import SortieDockerization
 
 
@@ -62,3 +62,27 @@ def test_generer_dockerisation_sans_bash_ni_lancement_docker(mock_run):
     commande = mock_run.call_args.args[0]
     assert "Bash" not in commande[commande.index("--allowedTools") + 1]
     assert "Ne lance PAS docker" in mock_run.call_args.kwargs["input"]
+
+
+def test_nommer_projet_compose_ajoute_le_nom_en_tete(tmp_path):
+    """Issue #1 : sans nom, tous les projets generes partageaient le volume output_db_data."""
+    compose = tmp_path / "docker-compose.yml"
+    compose.write_text("services:\n  db:\n    image: postgres:16\n", encoding="utf-8")
+    nommer_projet_compose(str(tmp_path), "todo-app-20261012-164425-0910")
+    assert compose.read_text(encoding="utf-8") == (
+        "name: todo-app-20261012-164425-0910\nservices:\n  db:\n    image: postgres:16\n")
+
+
+def test_nommer_projet_compose_remplace_un_nom_existant(tmp_path):
+    compose = tmp_path / "docker-compose.yml"
+    compose.write_text("name: output\nservices:\n  app:\n    container_name: x\n", encoding="utf-8")
+    nommer_projet_compose(str(tmp_path), "run-2")
+    contenu = compose.read_text(encoding="utf-8")
+    assert contenu.startswith("name: run-2\n")
+    assert "name: output" not in contenu
+    assert "container_name: x" in contenu
+
+
+def test_nommer_projet_compose_sans_fichier(tmp_path):
+    nommer_projet_compose(str(tmp_path), "run-3")
+    assert not (tmp_path / "docker-compose.yml").exists()

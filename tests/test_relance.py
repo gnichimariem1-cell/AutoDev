@@ -1,5 +1,6 @@
 """Relance automatique d'un agent par l'orchestrateur (@_proteger dans noeuds.py)."""
 import subprocess
+from pathlib import Path
 
 import requests
 
@@ -68,3 +69,15 @@ def test_erreur_reseau_dockerization_toujours_relancee(agents, monkeypatch):
     resultat = executer_pipeline(BESOIN)
     assert resultat["succes"] is True
     assert agents.generer_dockerisation.call_count == 2
+
+
+def test_compose_genere_nomme_avec_l_id_du_run(agents):
+    """Issue #1 : chaque run a son propre projet compose, donc ses propres volumes."""
+    def ecrire_compose(dossier_backend, dossier_frontend, dossier_docker):
+        (Path(dossier_docker) / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+        return SORTIE_DOCKER
+    agents.generer_dockerisation.side_effect = ecrire_compose
+    resultat = executer_pipeline(BESOIN)
+    assert resultat["succes"] is True
+    compose = (Path(resultat["dossier_docker"]) / "docker-compose.yml").read_text(encoding="utf-8")
+    assert compose.startswith(f"name: {resultat['id_run']}\n")

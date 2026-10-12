@@ -1,4 +1,5 @@
 ﻿import json
+import re
 import subprocess
 import shutil
 from pathlib import Path
@@ -96,3 +97,18 @@ Erreurs de validation :
         raise RuntimeError(f"Correction Docker échouée : {resultat.stdout}\n{resultat.stderr}")
 
     return SortieDockerization(fichiers_generes=_lister_fichiers(dossier_sortie), resume_technique=resultat.stdout[:500])
+
+
+def nommer_projet_compose(dossier_sortie: str, nom: str) -> None:
+    """Ecrit "name: <nom>" en tete de docker-compose.yml (issue #1).
+
+    Sans nom, docker compose prend celui du dossier ("output") pour tous les
+    projets generes : ils partagent alors le volume de la base, initialise une
+    seule fois avec le mot de passe du premier projet. Fait par le code et non
+    par le prompt, pour qu'une correction de l'agent ne puisse pas le retirer.
+    """
+    compose = Path(dossier_sortie) / "docker-compose.yml"
+    if not compose.exists():
+        return
+    contenu = re.sub(r"^name:.*\n?", "", compose.read_text(encoding="utf-8"), flags=re.MULTILINE)
+    compose.write_text(f"name: {nom}\n{contenu}", encoding="utf-8")

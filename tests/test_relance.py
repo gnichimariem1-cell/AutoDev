@@ -5,7 +5,7 @@ import requests
 
 from src.agent_orchestrateur import noeuds
 from src.agent_orchestrateur.orchestrateur import executer_pipeline
-from tests.sorties import BESOIN, SORTIE_DEV, SORTIE_FRONTEND
+from tests.sorties import BESOIN, SORTIE_DEV, SORTIE_DOCKER, SORTIE_FRONTEND
 
 
 def test_erreurs_passageres_reconnues():
@@ -51,3 +51,20 @@ def test_relance_desactivable(agents, monkeypatch):
     resultat = executer_pipeline(BESOIN)
     assert resultat["succes"] is False
     assert agents.generer_code.call_count == 1
+
+def test_timeout_dockerization_pas_relance(agents, monkeypatch):
+    """Issue #2 : relancer la Dockerization apres un timeout reproduisait le meme blocage."""
+    monkeypatch.setattr(noeuds, "ESSAIS_AGENT", 3)
+    agents.generer_dockerisation.side_effect = subprocess.TimeoutExpired("claude", 300)
+    resultat = executer_pipeline(BESOIN)
+    assert resultat["succes"] is False
+    assert resultat["etape"] == "dockerization"
+    assert agents.generer_dockerisation.call_count == 1
+
+
+def test_erreur_reseau_dockerization_toujours_relancee(agents, monkeypatch):
+    monkeypatch.setattr(noeuds, "ESSAIS_AGENT", 2)
+    agents.generer_dockerisation.side_effect = [requests.ConnectionError("coupure"), SORTIE_DOCKER]
+    resultat = executer_pipeline(BESOIN)
+    assert resultat["succes"] is True
+    assert agents.generer_dockerisation.call_count == 2

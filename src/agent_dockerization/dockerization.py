@@ -48,12 +48,15 @@ Le DATABASE_URL du service "app" doit utiliser le pilote PostgreSQL installe par
 - asyncpg -> postgresql+asyncpg://...
 
 Les services "app" et "frontend" doivent publier leur port sur l'hote (ex : 8000 et
-8080) : la configuration sera testee automatiquement (build, demarrage, requetes HTTP).
+8080) : l'etape suivante (Docker Validation) testera la configuration (build, demarrage,
+requetes HTTP). Ne lance PAS docker ni docker compose toi-meme.
 
 Ecris les fichiers directement sur disque, dans {dossier_sortie}/ uniquement."""
 
+    # Pas de Bash : avec le socket Docker monte, l'agent lancait lui-meme
+    # docker compose up, depassait le timeout et laissait des conteneurs (issue #2).
     resultat = subprocess.run(
-        [CLAUDE_BIN, "-p", "--allowedTools", "Write,Edit,Bash"],
+        [CLAUDE_BIN, "-p", "--allowedTools", "Read,Write,Edit"],
         input=prompt,
         capture_output=True, text=True, timeout=300,
         encoding="utf-8", errors="replace",

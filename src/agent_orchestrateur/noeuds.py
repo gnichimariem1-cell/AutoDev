@@ -55,7 +55,9 @@ def est_erreur_passagere(e: Exception) -> bool:
     return any(mot in message for mot in MOTS_ERREUR_PASSAGERE)
 
 
-def _proteger(nom_noeud: str):
+def _proteger(nom_noeud: str, relancer_timeout: bool = True):
+    """relancer_timeout=False : un depassement de delai n'est pas relance,
+    quand la relance ne ferait que reproduire le meme blocage."""
     def decorateur(noeud):
         @functools.wraps(noeud)
         def noeud_protege(etat: EtatPipeline) -> dict:
@@ -63,7 +65,9 @@ def _proteger(nom_noeud: str):
                 try:
                     return noeud(etat)
                 except Exception as e:
-                    if est_erreur_passagere(e) and essai < ESSAIS_AGENT:
+                    timeout = isinstance(e, (TimeoutError, subprocess.TimeoutExpired, requests.Timeout))
+                    relancable = est_erreur_passagere(e) and (relancer_timeout or not timeout)
+                    if relancable and essai < ESSAIS_AGENT:
                         attente = ATTENTE_RELANCE * essai
                         logger.warning("Noeud %s : erreur passagere (%s : %s), relance automatique %d/%d dans %.0f s",
                                        nom_noeud, type(e).__name__, e, essai + 1, ESSAIS_AGENT, attente)
@@ -176,7 +180,7 @@ def noeud_correction_frontend(etat: EtatPipeline) -> dict:
     return {"sortie_frontend": appliquer_corrections_frontend(rapport.erreurs, etat["dossier_frontend"])}
 
 
-@_proteger("dockerization")
+@_proteger("dockerization", relancer_timeout=False)
 def noeud_dockerization(etat: EtatPipeline) -> dict:
     logger.info("[8/9] Dockerization Agent : demarrage")
     rapport = generer_dockerisation(etat["dossier_backend"], etat["dossier_frontend"], etat["dossier_docker"])

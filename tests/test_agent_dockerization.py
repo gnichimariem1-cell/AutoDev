@@ -52,3 +52,13 @@ def test_generer_dockerisation_aligne_le_pilote_postgres_sur_requirements(mock_r
     assert "output/backend/requirements.txt" in prompt
     assert "postgresql+psycopg2://" in prompt
     assert "postgresql+psycopg://" in prompt
+
+
+@patch("src.agent_dockerization.dockerization.subprocess.run")
+def test_generer_dockerisation_sans_bash_ni_lancement_docker(mock_run):
+    """Issue #2 : avec le socket Docker, l'agent lancait docker compose up lui-meme."""
+    mock_run.return_value = MagicMock(returncode=0, stdout="OK", stderr="")
+    generer_dockerisation("output/backend", "output/frontend")
+    commande = mock_run.call_args.args[0]
+    assert "Bash" not in commande[commande.index("--allowedTools") + 1]
+    assert "Ne lance PAS docker" in mock_run.call_args.kwargs["input"]

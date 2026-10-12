@@ -32,6 +32,10 @@ MOTIFS_SUSPECTS = [
 ]
 
 
+# Champs du formulaire qui ne peuvent pas etre vides (defaut D4)
+CHAMPS_OBLIGATOIRES = ("Titre du projet", "Description", "Utilisateurs cibles", "Fonctionnalites cles")
+
+
 def valider_besoin(titre, description, utilisateurs, fonctionnalites, structure):
     """Validation basique cote AutoDev, en complement des garde-fous propres
     a Claude Code. Renvoie un message d'erreur (str) si invalide, ou None si OK.
@@ -52,6 +56,13 @@ def valider_besoin(titre, description, utilisateurs, fonctionnalites, structure)
                 "d'instruction destinee a l'IA plutot qu'a une description de projet. "
                 "Reformule ta demande."
             )
+
+    # Defaut D4 : les champs obligatoires ne doivent pas etre vides.
+    valeurs = {"Titre du projet": titre, "Description": description,
+               "Utilisateurs cibles": utilisateurs, "Fonctionnalites cles": fonctionnalites}
+    vides = [nom for nom in CHAMPS_OBLIGATOIRES if not (valeurs[nom] or "").strip(" ,\n\t")]
+    if vides:
+        return "Champ obligatoire vide : " + ", ".join(vides) + "."
     return None
 
 
@@ -940,12 +951,16 @@ def alerte_depuis_texte(texte) -> str:
 REPRISE = "La ou il s'est arrete"
 
 
+def _est_le_run_qui_tourne(id_run) -> bool:
+    return run_en_cours() and bool(id_run) and _run_actif.id_run == id_run
+
+
 def choix_de_relance(id_run) -> list[str]:
     """Choix de la liste « Relancer a partir de » pour ce run : d'abord la ou
     il s'est arrete (s'il a plante ou ete interrompu), puis chaque etape."""
     etapes = list(ETAPES_REJOUABLES)
-    if not id_run:
-        return etapes
+    if not id_run or _est_le_run_qui_tourne(id_run):
+        return etapes  # un run qui tourne ne s'est pas arrete
     try:
         suivante = point_de_reprise(id_run).next
     except RepriseImpossible:
@@ -978,12 +993,23 @@ def relance_pour(id_run, resultat):
             gr.update(value=f"Relancer a partir de « {etape} »", interactive=not occupe))
 
 
+# Etape d'ou repart chaque relance (pour l'affichage du debut de la relance)
+_DEPART_DU_RUN: dict[str, str] = {}
+
+
 def relancer_pipeline(id_run, choix, sections_choisies):
     """Clic sur « Relancer » : reprise si le premier choix (la ou il s'est
     arrete) est selectionne, sinon rejeu a partir de l'etape choisie."""
+    id_propre = (id_run or "").strip()
     if choix and choix.startswith(REPRISE):
+        try:
+            _DEPART_DU_RUN[id_propre] = point_de_reprise(id_propre).next[0]
+        except (RepriseImpossible, IndexError):
+            pass  # reprendre_pipeline affiche le message
         yield from reprendre_pipeline(id_run, sections_choisies)
     else:
+        if ETAPES_REJOUABLES.get(choix):
+            _DEPART_DU_RUN[id_propre] = ETAPES_REJOUABLES[choix]
         yield from rejouer_pipeline(id_run, choix, sections_choisies)
 
 
@@ -999,6 +1025,8 @@ def choisir_run(ids, evt: gr.SelectData):
         return (gr.update(),) * 7
     id_run = ids[ligne]
     resultat = etat_du_run(id_run)
+    if _est_le_run_qui_tourne(id_run):
+        resultat = dict(resultat, _en_cours="en_cours")  # pas encore fini : EN COURS
     return (id_run, texte_id(id_run), vue_run(resultat), liens_application(resultat),
             plan_de_test_du_run(resultat), *relance_pour(id_run, resultat))
 
@@ -1021,14 +1049,38 @@ def charger_page():
             gr.update(value=TEXTE_AUCUN_RUN_CHOISI, interactive=False))
 
 
+def _etat_pour_le_suivi(resultat):
+    """Etat a afficher dans « Run en cours ». Au debut d'un run (ou d'une
+    relance), avant la fin de la premiere etape, il n'y a pas encore d'etat
+    pour ce run : on affiche quand meme le run comme EN COURS."""
+    if not run_en_cours():
+        return resultat
+    id_actif = _run_actif.id_run
+    if resultat and resultat.get("_en_cours"):
+        return resultat
+    if resultat and id_actif and resultat.get("id_run") == id_actif:
+        # Relance : on garde les etapes d'avant, et on efface de l'affichage
+        # l'etape relancee et les suivantes (leur ancien resultat n'est plus valable).
+        etat = dict(resultat, _en_cours="demarrage")
+        for cle in ("erreur", "etape", "succes"):
+            etat.pop(cle, None)
+        noeuds = [noeud for noeud, _, _ in ETAPES_BARRE]
+        depart = _DEPART_DU_RUN.get(id_actif)
+        if depart in noeuds:
+            for _, _, cle in ETAPES_BARRE[noeuds.index(depart):]:
+                etat.pop(cle, None)
+        return etat
+    return {"id_run": id_actif, "_en_cours": "demarrage"}
+
+
 def vue_suivi(resultat):
-    return vue_run(resultat, avec_chrono=True)
+    return vue_run(_etat_pour_le_suivi(resultat), avec_chrono=True)
 
 
 def rafraichir_suivi(resultat):
     """Toutes les 5 s : le chronometre et le point orange de l'onglet."""
     if run_en_cours():
-        return vue_run(resultat, avec_chrono=True), gr.update(label="Run en cours ●")
+        return vue_run(_etat_pour_le_suivi(resultat), avec_chrono=True), gr.update(label="Run en cours ●")
     return gr.update(), gr.update(label="Run en cours")
 
 

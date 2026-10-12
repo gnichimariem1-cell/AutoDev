@@ -163,3 +163,52 @@ def test_clic_affiche_le_resultat_et_active_relancer(agents):
     sorties = choisir_run(ids, SimpleNamespace(index=[ids.index(ok["id_run"]), 0]))
     assert "SUCCES" in sorties[2] and "Clique sur un run" not in sorties[2]
     assert sorties[6]["interactive"] is True
+
+
+def test_suivi_affiche_le_run_des_le_debut(monkeypatch):
+    """Pendant la premiere etape, il n'y a pas encore d'etat : l'onglet doit
+    quand meme montrer un run EN COURS, pas « Aucun run en cours »."""
+    from src.agent_form import app
+    monkeypatch.setattr(app, "_run_actif", SimpleNamespace(id_run="", termine=False, debut=0, debut_etape=0))
+    html = app.vue_suivi(None)
+    assert "EN COURS" in html and "Aucun run en cours" not in html
+    assert "Le Product Owner" in html  # premiere etape en cours
+
+
+def test_clic_sur_le_run_qui_tourne(agents, monkeypatch):
+    """Dans « Runs existants », le run qui tourne s'affiche EN COURS, sans
+    « La ou il s'est arrete »."""
+    from src.agent_form import app
+    ok = executer_pipeline(BESOIN)
+    monkeypatch.setattr(app, "_run_actif", SimpleNamespace(id_run=ok["id_run"], termine=False, debut=0, debut_etape=0))
+    _, ids = runs_pour_tableau()
+    sorties = choisir_run(ids, SimpleNamespace(index=[ids.index(ok["id_run"]), 0]))
+    assert "EN COURS" in sorties[2] and "Termine" not in sorties[2]
+    assert sorties[5]["value"] == "Product Owner"
+    assert sorties[6]["interactive"] is False
+
+
+def test_suivi_sans_run_qui_tourne(monkeypatch):
+    from src.agent_form import app
+    monkeypatch.setattr(app, "_run_actif", None)
+    assert "Aucun run en cours" in app.vue_suivi(None)
+
+
+def test_debut_de_relance_efface_l_ancien_rapport(monkeypatch):
+    """Relancer a partir de Validation Docker apres un port occupe : l'etape
+    s'affiche « en cours », pas « correction », et les etapes d'avant restent vertes."""
+    from src.agent_form import app
+    ancien = {"id_run": "r1", "succes": False, "etape": "docker", "user_stories": 1, "architecture": 1,
+              "plan_tests": SimpleNamespace(cas=[]), "sortie_dev": 1,
+              "rapport_backend": SimpleNamespace(succes=True, tests_passes=1, tests_echoues=0),
+              "sortie_frontend": 1, "rapport_frontend": SimpleNamespace(succes=True),
+              "rapport_dockerisation": 1,
+              "rapport_validation_docker": SimpleNamespace(succes=False, docker_disponible=True,
+                                                           erreur_environnement=True)}
+    monkeypatch.setattr(app, "_run_actif", SimpleNamespace(id_run="r1", termine=False, debut=0, debut_etape=0))
+    monkeypatch.setitem(app._DEPART_DU_RUN, "r1", "validation_docker")
+    etats = {libelle: (etat, detail) for libelle, etat, detail in app.etats_des_etapes(app._etat_pour_le_suivi(ancien))}
+    assert etats["Validation Docker"] == ("en_cours", "")
+    assert etats["Dockerization"][0] == "ok"
+    message = app.message_en_ce_moment(app._etat_pour_le_suivi(ancien))
+    assert "corrige" not in message and "Docker Validation Agent" in message

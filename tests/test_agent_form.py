@@ -197,3 +197,17 @@ def test_entree_refusee_ne_lance_pas_le_pipeline(agents):
     assert len(sorties) == 1
     assert "Entree refusee" in sorties[0][0]
     agents.generer_user_stories.assert_not_called()
+
+
+def test_valider_besoin_refuse_champ_obligatoire_vide():
+    """Defaut D4 (SYS-01) : un champ obligatoire vide bloque le lancement."""
+    from src.agent_form.app import valider_besoin
+    message = valider_besoin("", "Gerer mes taches", "Etudiants", "creer une tache", "")
+    assert message is not None and "Titre du projet" in message
+    assert "Description" in valider_besoin("Todo", "   ", "Etudiants", "creer une tache", "")
+    assert "Fonctionnalites cles" in valider_besoin("Todo", "Gerer mes taches", "Etudiants", " , ", "")
+
+
+def test_valider_besoin_organisation_optionnelle():
+    from src.agent_form.app import valider_besoin
+    assert valider_besoin("Todo", "Gerer mes taches", "Etudiants", "creer une tache", "") is None

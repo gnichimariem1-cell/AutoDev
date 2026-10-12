@@ -1,10 +1,13 @@
-﻿import json
+import json
+import re
 import subprocess
 import shutil
 from pathlib import Path
 from src.common.schemas import SortieDockerization
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
+# Fichier ecrit par l'orchestrateur dans output/ : l'ID du run.
+FICHIER_ID_RUN = ".id_run"
 
 
 def generer_dockerisation(dossier_backend: str = "output/backend", dossier_frontend: str = "output/frontend", dossier_sortie: str = "output") -> SortieDockerization:
@@ -50,10 +53,19 @@ Le DATABASE_URL du service "app" doit utiliser le pilote PostgreSQL installe par
 Les services "app" et "frontend" doivent publier leur port sur l'hote (ex : 8000 et
 8080) : la configuration sera testee automatiquement (build, demarrage, requetes HTTP).
 
+Aucun mot de passe ni secret en clair dans docker-compose.yml (utilisateur et mot de
+passe PostgreSQL, compte administrateur, cle JWT...) : utilise des variables ${{NOM_VARIABLE}}.
+Ecris leurs valeurs dans {dossier_sortie}/.env (valeurs aleatoires, au moins 16 caracteres
+pour les mots de passe), et les memes noms sans valeur dans {dossier_sortie}/.env.example.
+Docker Compose lit {dossier_sortie}/.env automatiquement.
+
+N'execute aucune commande (pas de docker compose up, pas de docker build) : AutoDev
+construit et teste la configuration lui-meme juste apres.
+
 Ecris les fichiers directement sur disque, dans {dossier_sortie}/ uniquement."""
 
     resultat = subprocess.run(
-        [CLAUDE_BIN, "-p", "--allowedTools", "Write,Edit,Bash"],
+        [CLAUDE_BIN, "-p", "--allowedTools", "Read,Write,Edit"],
         input=prompt,
         capture_output=True, text=True, timeout=300,
         encoding="utf-8", errors="replace",
@@ -61,6 +73,7 @@ Ecris les fichiers directement sur disque, dans {dossier_sortie}/ uniquement."""
     if resultat.returncode != 0:
         raise RuntimeError(f"Dockerization Agent a échoué : {resultat.stderr}")
 
+    nommer_projet_compose(dossier_sortie)
     return SortieDockerization(fichiers_generes=_lister_fichiers(dossier_sortie), resume_technique=resultat.stdout[:500])
 
 
@@ -79,6 +92,8 @@ def appliquer_corrections_dockerisation(rapport_erreurs: list[str], dossier_sort
 .dockerignore). Elle a echoue a la validation (docker compose config/build/up puis verification
 HTTP des services "app" et "frontend"). Garde les noms de services "app", "frontend" et "db".
 Ne modifie que les fichiers Docker de {dossier_sortie}/, pas le code du backend ni du frontend.
+Garde la premiere ligne « name: ... » du docker-compose.yml, ne mets aucun secret en clair
+(variables ${{...}} lues dans {dossier_sortie}/.env) et n'execute aucune commande.
 
 Erreurs de validation :
 {json.dumps(rapport_erreurs, ensure_ascii=False, indent=2)}"""
@@ -92,4 +107,27 @@ Erreurs de validation :
     if resultat.returncode != 0:
         raise RuntimeError(f"Correction Docker échouée : {resultat.stdout}\n{resultat.stderr}")
 
+    nommer_projet_compose(dossier_sortie)
     return SortieDockerization(fichiers_generes=_lister_fichiers(dossier_sortie), resume_technique=resultat.stdout[:500])
+
+
+def nommer_projet_compose(dossier_sortie: str = "output") -> str | None:
+    """Donne a l'application generee son propre nom de projet Docker Compose.
+
+    Sans nom, Docker Compose prend le nom du dossier (« output ») : toutes les
+    applications generees partageaient alors le meme volume de base de donnees
+    (output_db_data), et un ancien volume gardait les identifiants d'un ancien
+    projet (defaut GEN-09). On ecrit « name: <id du run> » en premiere ligne
+    du docker-compose.yml. Renvoie le nom, ou None si rien n'a ete fait."""
+    compose = Path(dossier_sortie) / "docker-compose.yml"
+    fichier_id = Path(dossier_sortie) / FICHIER_ID_RUN
+    if not compose.exists() or not fichier_id.exists():
+        return None
+    # Nom de projet Compose : minuscules, chiffres, « - » et « _ », commence par une lettre ou un chiffre.
+    nom = re.sub(r"[^a-z0-9_-]+", "-", fichier_id.read_text(encoding="utf-8").strip().lower()).strip("-_")
+    if not nom:
+        return None
+    lignes = [ligne for ligne in compose.read_text(encoding="utf-8").splitlines()
+              if not re.match(r"name\s*:", ligne)]
+    compose.write_text(f"name: {nom}\n" + "\n".join(lignes) + "\n", encoding="utf-8")
+    return nom

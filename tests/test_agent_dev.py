@@ -19,3 +19,16 @@ def test_generer_code_appelle_claude_et_liste_fichiers(mock_run, tmp_path):
     assert "CORSMiddleware" in prompt
     assert "Ne génère PAS de Dockerfile ni de docker-compose.yml" in prompt
     assert "README.md" in prompt
+
+
+@patch("src.agent_dev.developer.subprocess.run")
+def test_generer_code_demande_les_ressources_prealables(mock_run, tmp_path):
+    """Issue #3 : FR-02 sans creation de membre, emprunter etait impossible."""
+    mock_run.return_value = MagicMock(returncode=0, stdout="OK", stderr="")
+    stories = SortiePO(user_stories=[UserStory(
+        id="US1", titre="Emprunter un livre", description="d",
+        criteres_acceptation=["c"], priorite="haute")])
+    generer_code(stories, dossier_sortie=str(tmp_path))
+    prompt = mock_run.call_args.kwargs["input"]
+    assert "permettre de creer cette autre ressource" in prompt
+    assert "n'est pas une ressource" in prompt

@@ -51,3 +51,14 @@ def test_generer_frontend_transmet_organisation_et_pages_prevues(mock_run, tmp_p
     assert "- catalogue.html - liste paginee des livres" in prompt
     assert "- js/api.js - client fetch centralise" in prompt
     assert "app/main.py" not in prompt
+
+
+@patch("src.agent_frontend.frontend.subprocess.run")
+def test_generer_frontend_prevoit_l_ecran_des_ressources_prealables(mock_run, tmp_path):
+    """Issue #3 : l'interface FR-02 renvoyait a la base de donnees pour creer un membre."""
+    mock_run.return_value = MagicMock(returncode=0, stdout="OK", stderr="")
+    stories = SortiePO(user_stories=[UserStory(
+        id="US1", titre="Emprunter un livre", description="d",
+        criteres_acceptation=["c"], priorite="haute")])
+    generer_frontend(stories, dossier_backend="output/backend", dossier_sortie=str(tmp_path))
+    assert "jamais avoir a passer" in mock_run.call_args.kwargs["input"]

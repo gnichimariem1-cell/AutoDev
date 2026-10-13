@@ -31,6 +31,11 @@ est généré séparément par un autre agent et servi par son propre conteneur 
 frontend de l'architecture ci-dessus. Active CORS (CORSMiddleware) pour que ce frontend, servi sur
 un autre port (ex : http://localhost:8080), puisse appeler l'API.
 
+Si une ressource en reference une autre (ex : un emprunt reference un membre), l'API doit
+permettre de creer cette autre ressource (route POST), meme si aucune User Story ne le dit :
+sinon la fonctionnalite est inutilisable. Jamais de ressource "creee directement en base".
+Un simple champ texte (ex : nom de l'auteur d'un commentaire) n'est pas une ressource : pas
+de route ni de compte en plus dans ce cas.
 Inclus également :
 - un fichier .env.example listant les variables necessaires (DATABASE_URL, SECRET_KEY, etc.)
 - un README.md qui documente comment lancer l'API : variables d'environnement, creation

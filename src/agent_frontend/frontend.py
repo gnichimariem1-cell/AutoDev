@@ -18,6 +18,9 @@ User Stories à couvrir :
 Contraintes :
 - index.html est le point d'entrée (page d'accueil) ; crée autant de pages que nécessaire, avec
   du JavaScript et du CSS partagés entre les pages.
+- Si l'API permet de creer une ressource dont une autre depend (ex : creer un membre avant
+  d'emprunter), prevois l'ecran correspondant : l'utilisateur ne doit jamais avoir a passer
+  par la base de donnees.
 - Utilise fetch() pour appeler l'API (URL de base configurable à un seul endroit, ex: http://localhost:8000).
 - Écris les fichiers directement sur disque.
 """

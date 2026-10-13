@@ -3,12 +3,13 @@ import os
 import json
 import shutil
 from pathlib import Path
-from src.common.schemas import SortiePO, SortieDev, SortieArchitecte
-from src.agent_test.testeur import CONTRAT_TECHNIQUE
+from src.common.schemas import BesoinUtilisateur, SortiePO, SortieDev, SortieArchitecte
+from src.agent_test.testeur import CONTRAT_TECHNIQUE, bloc_besoin
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
 
-def generer_code(user_stories: SortiePO, dossier_sortie: str = "output/backend", architecture: SortieArchitecte | None = None) -> SortieDev:
+def generer_code(user_stories: SortiePO, dossier_sortie: str = "output/backend", architecture: SortieArchitecte | None = None,
+                 besoin: BesoinUtilisateur | None = None) -> SortieDev:
     Path(dossier_sortie).mkdir(parents=True, exist_ok=True)
 
     if architecture:
@@ -25,7 +26,7 @@ def generer_code(user_stories: SortiePO, dossier_sortie: str = "output/backend",
     prompt = f"""Génère une API FastAPI + PostgreSQL dans {dossier_sortie} pour ces User Stories :
 {user_stories.model_dump_json(indent=2)}
 
-{bloc_architecture}Génère UNIQUEMENT le backend (l'API) : aucun fichier HTML/CSS/JavaScript, pas de dossier
+{bloc_besoin(besoin, "Chaque comportement decrit dans ce besoin doit etre realise par l'API, meme si aucune User Story ne le reprend.")}{bloc_architecture}Génère UNIQUEMENT le backend (l'API) : aucun fichier HTML/CSS/JavaScript, pas de dossier
 frontend/ ni static/, et l'API ne sert pas de fichiers statiques (pas de StaticFiles). Le frontend
 est généré séparément par un autre agent et servi par son propre conteneur : ignore les modules
 frontend de l'architecture ci-dessus. Active CORS (CORSMiddleware) pour que ce frontend, servi sur

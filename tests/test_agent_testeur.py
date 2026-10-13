@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from src.agent_test.testeur import generer_plan_et_tests, reviser_tests, lire_tests, restaurer_tests
-from src.common.schemas import SortieTestAgent, CasDeTest
+from src.common.schemas import BesoinUtilisateur, SortieTestAgent, CasDeTest
 from tests.sorties import USER_STORIES
 
 PLAN_JSON = json.dumps({"cas": [
@@ -184,3 +184,22 @@ def test_anciens_tests_supprimes_avant_le_nouveau_plan(mock_run, tmp_path):
 
     assert not ancien.exists()
     assert [Path(f).name for f in plan.fichiers_tests] == ["test_taches.py"]
+
+
+@patch("src.agent_test.testeur.subprocess.run")
+def test_generer_plan_recoit_la_description_du_besoin(mock_run, tmp_path):
+    """Issue #4 : « le membre voit ensuite la reponse » etait perdu apres le Product Owner."""
+    mock_run.side_effect = _claude_qui_ecrit_un_test(tmp_path, PLAN_JSON)
+    besoin = BesoinUtilisateur(titre_projet="FAQ", description="root repond ; le membre voit ensuite la reponse",
+                               utilisateurs_cibles="root et membres", fonctionnalites_cles=["poser une question"])
+    generer_plan_et_tests(USER_STORIES, str(tmp_path), besoin=besoin)
+    prompt = mock_run.call_args.kwargs["input"]
+    assert "le membre voit ensuite la reponse" in prompt
+    assert "au moins un cas de test" in prompt
+
+
+@patch("src.agent_test.testeur.subprocess.run")
+def test_generer_plan_sans_besoin_inchange(mock_run, tmp_path):
+    mock_run.side_effect = _claude_qui_ecrit_un_test(tmp_path, PLAN_JSON)
+    generer_plan_et_tests(USER_STORIES, str(tmp_path))
+    assert "Besoin exprime par l'utilisateur" not in mock_run.call_args.kwargs["input"]

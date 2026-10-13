@@ -81,3 +81,10 @@ def test_compose_genere_nomme_avec_l_id_du_run(agents):
     assert resultat["succes"] is True
     compose = (Path(resultat["dossier_docker"]) / "docker-compose.yml").read_text(encoding="utf-8")
     assert compose.startswith(f"name: {resultat['id_run']}\n")
+
+
+def test_besoin_transmis_aux_agents_claude(agents):
+    """Issue #4 : Test Agent, Developer et Frontend recoivent le besoin du formulaire."""
+    executer_pipeline(BESOIN)
+    for agent in (agents.generer_plan_et_tests, agents.generer_code, agents.generer_frontend):
+        assert agent.call_args.kwargs["besoin"] == BESOIN

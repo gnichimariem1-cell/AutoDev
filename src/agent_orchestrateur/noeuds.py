@@ -100,7 +100,8 @@ def noeud_architect(etat: EtatPipeline) -> dict:
 @_proteger("test_agent")
 def noeud_test_agent(etat: EtatPipeline) -> dict:
     logger.info("[3/9] Test Agent : demarrage (plan de test et tests ecrits avant le code)")
-    plan = generer_plan_et_tests(etat["user_stories"], etat["dossier_backend"], architecture=etat.get("architecture"))
+    plan = generer_plan_et_tests(etat["user_stories"], etat["dossier_backend"], architecture=etat.get("architecture"),
+                                 besoin=etat.get("besoin"))
     logger.info("[3/9] Test Agent : OK (%d cas de test, %d fichiers)", len(plan.cas), len(plan.fichiers_tests))
     return {"plan_tests": plan, "tests_originaux": lire_tests(etat["dossier_backend"])}
 
@@ -108,7 +109,8 @@ def noeud_test_agent(etat: EtatPipeline) -> dict:
 @_proteger("developer")
 def noeud_developer(etat: EtatPipeline) -> dict:
     logger.info("[4/9] Developer Agent : demarrage")
-    sortie_dev = generer_code(etat["user_stories"], etat["dossier_backend"], architecture=etat["architecture"])
+    sortie_dev = generer_code(etat["user_stories"], etat["dossier_backend"], architecture=etat["architecture"],
+                              besoin=etat.get("besoin"))
     logger.info("[4/9] Developer Agent : OK (%d fichiers generes)", len(sortie_dev.fichiers_generes))
     return {"sortie_dev": sortie_dev}
 
@@ -159,6 +161,7 @@ def noeud_frontend(etat: EtatPipeline) -> dict:
     sortie_frontend = generer_frontend(
         etat["user_stories"], etat["dossier_backend"], etat["dossier_frontend"],
         architecture=etat.get("architecture"), organisation_interface=etat["besoin"].structure_projet,
+        besoin=etat["besoin"],
     )
     logger.info("[6/9] Frontend Agent : OK (%d fichiers generes)", len(sortie_frontend.fichiers_generes))
     return {"sortie_frontend": sortie_frontend}

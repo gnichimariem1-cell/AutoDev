@@ -14,7 +14,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from src.common.schemas import SortiePO, SortieArchitecte, SortieTestAgent
+from src.common.schemas import BesoinUtilisateur, SortiePO, SortieArchitecte, SortieTestAgent
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
 
@@ -26,6 +26,19 @@ CONTRAT_TECHNIQUE = """Contrat technique du backend (obligatoire) :
   et `get_db` (dependance FastAPI qui fournit une session SQLAlchemy)
 - les routes, methodes HTTP, champs JSON et codes de reponse sont ceux du plan de test
 - les tests se lancent avec `pytest <dossier backend>`, le dossier backend etant dans le PYTHONPATH"""
+
+
+def bloc_besoin(besoin: BesoinUtilisateur | None, consigne: str) -> str:
+    """Besoin saisi dans le formulaire, transmis tel quel aux agents Claude (issue #4) :
+    un comportement de la description oublie par le Product Owner (ex : « le membre
+    voit ensuite la reponse ») etait perdu pour tous les agents suivants."""
+    if besoin is None:
+        return ""
+    return (f"Besoin exprime par l'utilisateur dans le formulaire (il fait foi, en plus des User Stories) :\n"
+            f"- Projet : {besoin.titre_projet}\n"
+            f"- Description : {besoin.description}\n"
+            f"- Utilisateurs cibles : {besoin.utilisateurs_cibles}\n"
+            f"{consigne}\n\n")
 
 
 def _extraire_json(texte: str) -> str:
@@ -94,7 +107,8 @@ def plan_en_markdown(plan: SortieTestAgent, titre_projet: str = "") -> str:
 
 def generer_plan_et_tests(user_stories: SortiePO, dossier_backend: str = "output/backend",
                           architecture: SortieArchitecte | None = None,
-                          fichier_plan: str | None = None) -> SortieTestAgent:
+                          fichier_plan: str | None = None,
+                          besoin: BesoinUtilisateur | None = None) -> SortieTestAgent:
     """Ecrit le plan de test et les tests pytest dans <dossier_backend>/tests/,
     avant que le Developer n'ecrive le code."""
     # Repart d'un dossier tests/ vide : apres un Rejouer, les tests de l'ancien plan
@@ -117,7 +131,7 @@ AVANT le code (TDD). Un autre agent ecrira ensuite le code pour faire passer tes
 User Stories :
 {user_stories.model_dump_json(indent=2)}
 
-{bloc_architecture}{CONTRAT_TECHNIQUE}
+{bloc_besoin(besoin, "Chaque comportement decrit dans ce besoin doit avoir au moins un cas de test, meme si aucune User Story ne le reprend (ex : ce qu'un role fait doit etre visible par l'autre role si la description le dit).")}{bloc_architecture}{CONTRAT_TECHNIQUE}
 
 Travail demande :
 1. Concois un plan de test : pour chaque user story, au moins un cas nominal et un cas d'erreur

@@ -2,7 +2,8 @@ import json
 import subprocess
 import shutil
 from pathlib import Path
-from src.common.schemas import SortiePO, SortieFrontend, SortieArchitecte
+from src.common.schemas import BesoinUtilisateur, SortiePO, SortieFrontend, SortieArchitecte
+from src.agent_test.testeur import bloc_besoin
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
 
@@ -14,7 +15,8 @@ Commence par lire les routes de {dossier_backend}/app/routers/ pour connaître l
 
 User Stories à couvrir :
 {user_stories_json}
-{bloc_conception}
+
+{bloc_besoin}{bloc_conception}
 Contraintes :
 - index.html est le point d'entrée (page d'accueil) ; crée autant de pages que nécessaire, avec
   du JavaScript et du CSS partagés entre les pages.
@@ -51,12 +53,14 @@ def generer_frontend(
     dossier_sortie: str = "output/frontend",
     architecture: SortieArchitecte | None = None,
     organisation_interface: str = "",
+    besoin: BesoinUtilisateur | None = None,
 ) -> SortieFrontend:
     Path(dossier_sortie).mkdir(parents=True, exist_ok=True)
     prompt = PROMPT_TEMPLATE.format(
         dossier_sortie=dossier_sortie,
         dossier_backend=dossier_backend,
         user_stories_json=user_stories.model_dump_json(indent=2),
+        bloc_besoin=bloc_besoin(besoin, "Chaque comportement decrit dans ce besoin doit etre accessible depuis l'interface."),
         bloc_conception=_bloc_conception(architecture, organisation_interface),
     )
 

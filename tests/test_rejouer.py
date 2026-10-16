@@ -17,7 +17,7 @@ def test_rejouer_la_validation_docker_seulement(agents):
 
     evenements = _rejouer(resultat["id_run"], "validation_docker")
 
-    assert [noeud for noeud, _ in evenements] == ["validation_docker"]
+    assert [noeud for noeud, _ in evenements] == ["validation_docker", "generation_e2e", "e2e"]
     assert evenements[-1][1]["succes"] is True
     assert agents.valider_dockerisation.call_count == 2
     agents.generer_user_stories.assert_called_once()
@@ -29,7 +29,7 @@ def test_rejouer_a_partir_du_frontend_garde_le_backend(agents):
 
     noeuds = [noeud for noeud, _ in _rejouer(resultat["id_run"], "frontend")]
 
-    assert noeuds == ["frontend", "qa_frontend", "dockerization", "validation_docker"]
+    assert noeuds == ["frontend", "qa_frontend", "dockerization", "validation_docker", "generation_e2e", "e2e"]
     assert agents.generer_frontend.call_count == 2
     agents.generer_plan_et_tests.assert_called_once()
     agents.generer_code.assert_called_once()
@@ -100,5 +100,5 @@ def test_rejouer_apres_un_rejeu_part_du_plus_recent(agents):
 
     evenements = _rejouer(resultat["id_run"], "validation_docker")
 
-    assert [noeud for noeud, _ in evenements] == ["validation_docker"]
+    assert [noeud for noeud, _ in evenements] == ["validation_docker", "generation_e2e", "e2e"]
     assert evenements[-1][1]["user_stories"] == nouvelles

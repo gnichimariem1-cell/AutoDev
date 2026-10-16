@@ -4,7 +4,7 @@ donc contenir des objets serialisables (pas de MagicMock)."""
 from src.common.schemas import (
     BesoinUtilisateur, SortiePO, UserStory, SortieArchitecte, SortieDev, RapportQA,
     SortieFrontend, RapportQAFrontend, SortieDockerization, RapportValidationDocker,
-    SortieTestAgent, CasDeTest,
+    SortieTestAgent, CasDeTest, SortieAgentE2E, ScenarioE2E, RapportE2E, EchecE2E,
 )
 
 BESOIN = BesoinUtilisateur(titre_projet="Todo App", description="y", utilisateurs_cibles="z", fonctionnalites_cles=["a"])
@@ -27,3 +27,11 @@ FE_OK = RapportQAFrontend(fichiers_verifies=["index.html"], succes=True)
 FE_KO = RapportQAFrontend(fichiers_verifies=["index.html"], succes=False, erreurs=["erreur JS"])
 DOCKER_OK = RapportValidationDocker(docker_disponible=True, succes=True)
 DOCKER_KO = RapportValidationDocker(docker_disponible=True, succes=False, erreurs=["build : erreur"])
+PLAN_E2E = SortieAgentE2E(scenarios=[
+    ScenarioE2E(id="E01", user_story="US1", description="Creer une tache par l'API"),
+    ScenarioE2E(id="E02", user_story="US1", description="Titre vide refuse"),
+], fichiers=["output/e2e/test_api_e2e.py"])
+E2E_OK = RapportE2E(docker_disponible=True, succes=True, total=2, reussis=2)
+E2E_KO = RapportE2E(docker_disponible=True, succes=False, total=2, reussis=1, echecs=[
+    EchecE2E(id="E02", test="test_api_e2e.py::test_E02", message="attendu 422, obtenu 201")],
+    erreurs=["E02 : attendu 422, obtenu 201"])

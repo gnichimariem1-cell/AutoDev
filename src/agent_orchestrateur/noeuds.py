@@ -26,6 +26,8 @@ from src.agent_frontend.frontend import generer_frontend, appliquer_corrections_
 from src.agent_qa.qa import lancer_tests, lancer_tests_frontend
 from src.agent_dockerization.dockerization import generer_dockerisation, appliquer_corrections_dockerisation
 from src.agent_validation_docker.validation_docker import valider_dockerisation
+from src.agent_e2e.e2e import generer_tests_e2e, executer_tests_e2e, dossier_e2e
+from src.common.schemas import SortieAgentE2E, RapportE2E
 from src.agent_orchestrateur.etat import EtatPipeline, MAX_TENTATIVES
 
 logger = configurer_logging()
@@ -202,6 +204,53 @@ def noeud_correction_docker(etat: EtatPipeline) -> dict:
     logger.warning("[9/9] Docker Validation Agent : echec tentative %d — correction en cours — %s",
                    etat["tentative_docker"], rapport.erreurs)
     return {"rapport_dockerisation": appliquer_corrections_dockerisation(rapport.erreurs, etat["dossier_docker"])}
+
+
+def e2e_actif() -> bool:
+    """Tests E2E actives (par defaut). E2E_ACTIF=0 dans .env pour les desactiver."""
+    return os.environ.get("E2E_ACTIF", "1").strip().lower() not in ("0", "non", "false", "no")
+
+
+def _demande_complete(besoin) -> str:
+    return (f"Titre : {besoin.titre_projet}\nDescription : {besoin.description}\n"
+            f"Utilisateurs : {besoin.utilisateurs_cibles}\n"
+            f"Fonctionnalites : {', '.join(besoin.fonctionnalites_cles)}\nInterface : {besoin.structure_projet}")
+
+
+@_proteger("generation_e2e")
+def noeud_generation_e2e(etat: EtatPipeline) -> dict:
+    """L'Agent E2E ecrit des scenarios qui utilisent l'API comme un vrai utilisateur."""
+    validation = etat.get("rapport_validation_docker")
+    if not e2e_actif():
+        logger.info("[E2E] Agent E2E : desactive (E2E_ACTIF=0 dans .env)")
+        return {"plan_e2e": SortieAgentE2E(active=False)}
+    if validation is not None and not validation.docker_disponible:
+        logger.warning("[E2E] Agent E2E : Docker non joignable, scenarios non ecrits")
+        return {"plan_e2e": SortieAgentE2E(active=False)}
+    logger.info("[E2E] Agent E2E : demarrage (scenarios sur la vraie API)")
+    plan = generer_tests_e2e(etat["user_stories"], _demande_complete(etat["besoin"]),
+                             etat["dossier_backend"], dossier_e2e(etat["dossier_docker"]))
+    logger.info("[E2E] Agent E2E : OK (%d scenarios)", len(plan.scenarios))
+    return {"plan_e2e": plan}
+
+
+@_proteger("e2e")
+def noeud_e2e(etat: EtatPipeline) -> dict:
+    """AutoDev demarre l'application et joue les scenarios E2E (sans IA). Rapport seulement."""
+    plan = etat.get("plan_e2e")
+    if plan is None or not plan.active:
+        raison = "desactives (E2E_ACTIF=0)" if not e2e_actif() else "non effectues : Docker n'est pas joignable"
+        return {"rapport_e2e": RapportE2E(docker_disponible=False, succes=False, erreurs=[f"Tests E2E {raison}."])}
+    logger.info("[E2E] Tests E2E : demarrage de l'application et des scenarios")
+    rapport = executer_tests_e2e(etat["dossier_docker"], dossier_e2e(etat["dossier_docker"]))
+    if not rapport.docker_disponible:
+        logger.warning("[E2E] Tests E2E : non effectues (%s)", " ".join(rapport.erreurs))
+    elif rapport.succes:
+        logger.info("[E2E] Tests E2E : OK (%d/%d scenarios)", rapport.reussis, rapport.total)
+    else:
+        logger.warning("[E2E] Tests E2E : %d/%d scenarios reussis — %s",
+                       rapport.reussis, rapport.total, [e.id for e in rapport.echecs])
+    return {"rapport_e2e": rapport}
 
 
 # Pour chaque etape pouvant echouer : (cle du rapport, cle du compteur)

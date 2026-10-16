@@ -1,7 +1,7 @@
 """Assemblage du graphe LangGraph du pipeline :
 
 START -> po -> architect -> test_agent -> developer -> qa_backend -> frontend -> qa_frontend
-      -> dockerization -> validation_docker -> END
+      -> dockerization -> validation_docker -> generation_e2e -> e2e -> END
 
 Chaque QA a trois sorties (voir routage.py) : "ok" vers l'etape suivante,
 "corriger" vers son noeud de correction (qui reboucle sur le QA), "abandon"
@@ -29,6 +29,8 @@ from src.agent_orchestrateur.routage import (
 # ce qui serait depasse des MAX_TENTATIVES=4 : on calcule donc la limite.
 # + revision_tests puis une seconde serie de MAX_TENTATIVES QA backend
 LIMITE_RECURSION = 7 + 3 * (2 * MAX_TENTATIVES - 1) + 2 * MAX_TENTATIVES + 5
+# + generation_e2e et e2e
+LIMITE_RECURSION += 2
 
 FICHIER_SCHEMA = Path("docs/pipeline.md")
 
@@ -49,6 +51,8 @@ def construire_graphe(checkpointer=None):
     graphe.add_node("dockerization", noeuds.noeud_dockerization)
     graphe.add_node("validation_docker", noeuds.noeud_validation_docker)
     graphe.add_node("correction_docker", noeuds.noeud_correction_docker)
+    graphe.add_node("generation_e2e", noeuds.noeud_generation_e2e)
+    graphe.add_node("e2e", noeuds.noeud_e2e)
     graphe.add_node("echec", noeuds.noeud_echec)
 
     def enchainer(source: str, suivant: str):
@@ -77,9 +81,13 @@ def construire_graphe(checkpointer=None):
 
     enchainer("dockerization", "validation_docker")
     graphe.add_conditional_edges("validation_docker", router_validation_docker, {
-        "ok": END, "corriger": "correction_docker", "abandon": "echec",
+        "ok": "generation_e2e", "corriger": "correction_docker", "abandon": "echec",
     })
     enchainer("correction_docker", "validation_docker")
+
+    # Tests E2E : rapport seulement (ils ne bloquent pas le run)
+    enchainer("generation_e2e", "e2e")
+    enchainer("e2e", END)
 
     graphe.add_edge("echec", END)
 

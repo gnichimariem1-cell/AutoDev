@@ -1,4 +1,4 @@
-﻿from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field
 from typing import Literal
 
 class BesoinUtilisateur(BaseModel):
@@ -85,4 +85,35 @@ class RapportValidationDocker(BaseModel):
     erreurs: list[str] = []
     # True si l'echec vient de la machine (ex : port deja occupe) et non de la
     # configuration generee : inutile alors de demander une correction a Claude.
+    erreur_environnement: bool = False
+
+
+class ScenarioE2E(BaseModel):
+    """Un scenario ecrit par l'Agent E2E"""
+    id: str
+    type: str = "api"
+    user_story: str = ""
+    description: str = ""
+
+class SortieAgentE2E(BaseModel):
+    """Sortie de l'Agent E2E : les scenarios ecrits dans <output>/e2e/"""
+    scenarios: list[ScenarioE2E] = []
+    fichiers: list[str] = []
+    active: bool = True  # False : E2E desactive ou Docker non joignable
+
+class EchecE2E(BaseModel):
+    """Un scenario E2E en echec"""
+    id: str
+    type: str = "api"
+    test: str = ""
+    message: str = ""
+
+class RapportE2E(BaseModel):
+    """Resultat des scenarios E2E joues sur l'application demarree"""
+    docker_disponible: bool
+    succes: bool
+    total: int = 0
+    reussis: int = 0
+    echecs: list[EchecE2E] = []
+    erreurs: list[str] = []
     erreur_environnement: bool = False

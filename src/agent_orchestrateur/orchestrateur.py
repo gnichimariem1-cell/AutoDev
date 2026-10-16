@@ -188,6 +188,8 @@ ETAPES_REJOUABLES = {
     "QA frontend": "qa_frontend",
     "Dockerization": "dockerization",
     "Validation Docker": "validation_docker",
+    "Agent E2E": "generation_e2e",
+    "Tests E2E": "e2e",
 }
 
 

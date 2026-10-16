@@ -197,6 +197,29 @@ def _section_validation_docker(resultat) -> str:
     return texte
 
 
+def _section_agent_e2e(resultat) -> str:
+    plan = resultat.get("plan_e2e")
+    if not plan:
+        return "9. Agent E2E\n   (non atteint)\n"
+    if not plan.active:
+        return "9. Agent E2E — NON EFFECTUE (desactive ou Docker non joignable)\n"
+    lignes = [f"   - {s.id} {s.user_story} : {s.description}" for s in plan.scenarios]
+    return f"9. Agent E2E — OK ({len(plan.scenarios)} scenarios)\n" + "\n".join(lignes) + "\n"
+
+
+def _section_tests_e2e(resultat) -> str:
+    rapport = resultat.get("rapport_e2e")
+    if not rapport:
+        return "10. Tests E2E\n   (non atteint)\n"
+    if not rapport.docker_disponible:
+        return "10. Tests E2E — NON EFFECTUES\n   " + " ".join(rapport.erreurs) + "\n"
+    statut = "OK" if rapport.succes else "SCENARIOS EN ECHEC (rapport, le run n'est pas bloque)"
+    texte = f"10. Tests E2E — {statut} : {rapport.reussis}/{rapport.total} scenarios reussis\n"
+    if not rapport.succes:
+        texte += "   Erreurs :\n" + "\n".join(f"     - {e[:500]}" for e in rapport.erreurs) + "\n"
+    return texte
+
+
 SECTIONS = {
     "Product Owner": _section_product_owner,
     "Architect": _section_architect,
@@ -207,6 +230,8 @@ SECTIONS = {
     "QA Frontend": _section_qa_frontend,
     "Dockerization": _section_dockerization,
     "Validation Docker": _section_validation_docker,
+    "Agent E2E": _section_agent_e2e,
+    "Tests E2E": _section_tests_e2e,
 }
 TOUTES_LES_SECTIONS = list(SECTIONS.keys())
 
@@ -226,6 +251,8 @@ LIBELLES_NOEUDS = {
     "dockerization": "Dockerization Agent",
     "validation_docker": "Docker Validation Agent",
     "correction_docker": "Correction de la config Docker",
+    "generation_e2e": "Agent E2E",
+    "e2e": "Tests E2E",
     "echec": "Arret du pipeline",
 }
 
@@ -495,6 +522,8 @@ ETAPES_BARRE = [
     ("qa_frontend", "QA Frontend", "rapport_frontend"),
     ("dockerization", "Dockerization", "rapport_dockerisation"),
     ("validation_docker", "Validation Docker", "rapport_validation_docker"),
+    ("generation_e2e", "Agent E2E", "plan_e2e"),
+    ("e2e", "Tests E2E", "rapport_e2e"),
 ]
 # Etape d'echec final (cle "etape" de l'etat) -> noeud du controle concerne
 ETAPE_ECHEC_VERS_NOEUD = {"backend": "qa_backend", "frontend": "qa_frontend", "docker": "validation_docker"}
@@ -530,6 +559,19 @@ def etats_des_etapes(resultat) -> list[tuple[str, str, str]]:
                 detail = f"{len(valeur.cas)} cas" + (" · revises" if resultat.get("tests_revises") else "")
             elif noeud == "qa_backend":
                 detail = f"{valeur.tests_passes}/{valeur.tests_passes + valeur.tests_echoues}"
+            elif noeud == "generation_e2e":
+                if valeur.active:
+                    detail = f"{len(valeur.scenarios)} scenarios"
+                else:
+                    etat, detail = "attention", "non effectue"
+            elif noeud == "e2e":
+                # Rapport seulement : un scenario en echec ne fait pas echouer le run
+                if not valeur.docker_disponible:
+                    etat, detail = "attention", "non effectues"
+                else:
+                    detail = f"{valeur.reussis}/{valeur.total}"
+                    if not valeur.succes:
+                        etat = "attention"
             if noeud in ("qa_backend", "qa_frontend", "validation_docker") and not valeur.succes:
                 tentative = resultat.get(
                     {"qa_backend": "tentative_backend", "qa_frontend": "tentative_frontend",
@@ -590,6 +632,8 @@ MESSAGES_ETAPE = {
     "QA Frontend": "Le QA verifie le frontend.",
     "Dockerization": "Le Dockerization Agent ecrit le Dockerfile et le docker-compose.",
     "Validation Docker": "Le Docker Validation Agent construit et demarre l'application pour verifier qu'elle marche.",
+    "Agent E2E": "L'Agent E2E ecrit des scenarios qui utilisent l'API comme un vrai utilisateur.",
+    "Tests E2E": "AutoDev demarre l'application et joue les scenarios E2E sur la vraie API.",
 }
 CORRECTEURS = {"QA Backend": "le Developer corrige le code",
                "QA Frontend": "le Frontend Agent corrige l'interface",
@@ -785,6 +829,17 @@ def _resume_etape(libelle, resultat) -> str:
             if not r.docker_disponible:
                 return "non effectuee : Docker non joignable"
             return " · ".join(f"{e.nom} {'OK' if e.succes else 'ECHEC'}" for e in r.etapes) or "OK"
+        if libelle == "Agent E2E":
+            plan = resultat["plan_e2e"]
+            if not plan.active:
+                return "non effectue : desactive ou Docker non joignable"
+            return f"{len(plan.scenarios)} scenarios sur la vraie API"
+        if libelle == "Tests E2E":
+            r = resultat["rapport_e2e"]
+            if not r.docker_disponible:
+                return "non effectues : " + " ".join(r.erreurs)
+            echecs = ", ".join(e.id for e in r.echecs)
+            return f"{r.reussis}/{r.total} scenarios reussis" + (f" · en echec : {echecs}" if echecs else "")
     except (KeyError, AttributeError, TypeError):
         return ""
     return ""

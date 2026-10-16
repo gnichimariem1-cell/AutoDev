@@ -24,6 +24,8 @@ SORTIES_PAR_DEFAUT = {
     "generer_dockerisation": sorties.SORTIE_DOCKER,
     "appliquer_corrections_dockerisation": sorties.SORTIE_DOCKER,
     "valider_dockerisation": sorties.DOCKER_OK,
+    "generer_tests_e2e": sorties.PLAN_E2E,
+    "executer_tests_e2e": sorties.E2E_OK,
 }
 
 
@@ -35,6 +37,8 @@ def agents(tmp_path, monkeypatch):
     Le test s'execute dans tmp_path : l'archivage des sorties en debut de run ne
     touche ni output/ ni archives/ du projet."""
     monkeypatch.chdir(tmp_path)
+    # Les tests ne dependent pas du .env du poste : tests E2E actives par defaut
+    monkeypatch.setenv("E2E_ACTIF", "1")
     with ExitStack() as pile:
         mocks = {
             nom: pile.enter_context(patch(f"src.agent_orchestrateur.noeuds.{nom}", return_value=sortie))

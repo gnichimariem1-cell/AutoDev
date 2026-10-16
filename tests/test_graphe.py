@@ -58,7 +58,7 @@ def test_structure_du_graphe():
     plantages = {
         (n, "echec") for n in [
             "po", "architect", "test_agent", "developer", "correction_backend", "revision_tests", "frontend",
-            "correction_frontend", "dockerization", "correction_docker",
+            "correction_frontend", "dockerization", "correction_docker", "generation_e2e", "e2e",
         ]
     }
     assert {
@@ -71,8 +71,9 @@ def test_structure_du_graphe():
         ("qa_frontend", "dockerization"), ("qa_frontend", "correction_frontend"), ("qa_frontend", "echec"),
         ("correction_frontend", "qa_frontend"),
         ("dockerization", "validation_docker"),
-        ("validation_docker", "__end__"), ("validation_docker", "correction_docker"), ("validation_docker", "echec"),
+        ("validation_docker", "generation_e2e"), ("validation_docker", "correction_docker"), ("validation_docker", "echec"),
         ("correction_docker", "validation_docker"),
+        ("generation_e2e", "e2e"), ("e2e", "__end__"),
         ("echec", "__end__"),
     } | plantages == aretes
 
@@ -137,7 +138,7 @@ def test_execution_en_direct_suit_les_noeuds(agents):
 
     assert [noeud for noeud, _ in evenements] == [
         "po", "architect", "test_agent", "developer", "qa_backend", "correction_backend", "qa_backend",
-        "frontend", "qa_frontend", "dockerization", "validation_docker",
+        "frontend", "qa_frontend", "dockerization", "validation_docker", "generation_e2e", "e2e",
     ]
     # l'etat s'enrichit au fil des noeuds
     assert "architecture" not in evenements[0][1]

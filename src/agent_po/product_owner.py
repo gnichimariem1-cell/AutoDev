@@ -3,11 +3,15 @@ import json
 import os
 import re
 import unicodedata
+import shutil
+import subprocess
 import requests
 from src.common.schemas import BesoinUtilisateur, SortiePO, UserStory
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")
 MODEL = os.environ.get("OLLAMA_MODEL", "qwen3")
+# Moteur du Product Owner : "ollama" (local, par defaut) ou "claude" (Claude Code).
+CLAUDE_BIN = shutil.which("claude") or "claude"
 
 PROMPT_TEMPLATE = """Tu es un Product Owner. À partir du besoin ci-dessous, génère des User Stories
 au format JSON STRICT (rien d'autre que le JSON), avec ce schéma EXACT (respecte precisement
@@ -64,7 +68,7 @@ def _normaliser_cles(obj):
     return obj
 
 
-def _demander(prompt: str) -> SortiePO:
+def _demander_ollama(prompt: str) -> SortiePO:
     """Envoie la consigne a Ollama et renvoie les user stories validees."""
     response = requests.post(OLLAMA_URL, json={
         "model": MODEL,
@@ -97,6 +101,47 @@ def _demander(prompt: str) -> SortiePO:
 
     donnees_normalisees = _normaliser_cles(donnees_brutes)
     return SortiePO.model_validate(donnees_normalisees)
+
+
+def _extraire_json(texte: str) -> str:
+    """Claude encadre parfois sa reponse de balises ```json ... ``` : on les retire."""
+    match = re.search(r"```(?:json)?\s*(.*?)\s*```", texte.strip(), re.DOTALL)
+    return match.group(1).strip() if match else texte.strip()
+
+
+def _demander_claude(prompt: str) -> SortiePO:
+    """Envoie la meme consigne a Claude Code et renvoie les user stories validees."""
+    resultat = subprocess.run(
+        [CLAUDE_BIN, "-p"],
+        input=prompt + "\nReponds UNIQUEMENT avec le JSON, sans texte autour.",
+        capture_output=True, text=True, timeout=int(os.environ.get("CLAUDE_TIMEOUT", 1200)),
+        encoding="utf-8", errors="replace",
+    )
+    if resultat.returncode != 0:
+        raise RuntimeError(f"Product Owner (Claude) a échoué : {resultat.stdout}\n{resultat.stderr}")
+    contenu = _extraire_json(resultat.stdout)
+    try:
+        donnees_brutes = json.loads(contenu)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"Claude n'a pas retourné un JSON valide.\n"
+            f"Contenu reçu (200 premiers caracteres) : {contenu[:200]!r}\n"
+            f"Erreur : {e}"
+        )
+    return SortiePO.model_validate(_normaliser_cles(donnees_brutes))
+
+
+def moteur_po() -> str:
+    """Moteur choisi dans .env (PO_MOTEUR) ; Ollama si absent ou inconnu."""
+    moteur = os.environ.get("PO_MOTEUR", "ollama").strip().lower()
+    return moteur if moteur in ("ollama", "claude") else "ollama"
+
+
+def _demander(prompt: str) -> SortiePO:
+    """Envoie la consigne au moteur choisi (Ollama ou Claude)."""
+    if moteur_po() == "claude":
+        return _demander_claude(prompt)
+    return _demander_ollama(prompt)
 
 
 # --- Verification : chaque fonctionnalite du formulaire a sa user story ---

@@ -109,3 +109,41 @@ def test_fonctionnalite_fusionnee_est_couverte():
         _story("US1", "Poser une question", "La premiere question cree une conversation")]})
     assert fonctionnalites_manquantes(["creer une conversation", "supprimer une conversation"], sortie) \
         == ["supprimer une conversation"]
+
+
+def test_po_avec_claude(monkeypatch):
+    """PO_MOTEUR=claude : le Product Owner passe par Claude Code, pas par Ollama."""
+    from unittest.mock import MagicMock, patch
+    from src.common.schemas import BesoinUtilisateur
+    monkeypatch.setenv("PO_MOTEUR", "claude")
+    reponse = ('```json\n{"user_stories": [{"id": "US1", "titre": "Creer une tache", '
+               '"description": "L\'utilisateur cree une tache", "criteres_acceptation": ["titre obligatoire"], '
+               '"priorite": "haute"}]}\n```')
+    besoin = BesoinUtilisateur(titre_projet="Taches", description="Gerer des taches",
+                               utilisateurs_cibles="Etudiants", fonctionnalites_cles=["creer une tache"])
+    with patch("src.agent_po.product_owner.subprocess.run",
+               return_value=MagicMock(returncode=0, stdout=reponse, stderr="")) as claude, \
+         patch("src.agent_po.product_owner.requests.post") as ollama:
+        sortie = generer_user_stories(besoin)
+    assert claude.called and not ollama.called
+    assert sortie.user_stories[0].titre == "Creer une tache"
+
+
+def test_po_moteur_par_defaut_ollama(monkeypatch):
+    """Sans PO_MOTEUR (ou valeur inconnue), rien ne change : Ollama."""
+    from src.agent_po.product_owner import moteur_po
+    monkeypatch.delenv("PO_MOTEUR", raising=False)
+    assert moteur_po() == "ollama"
+    monkeypatch.setenv("PO_MOTEUR", "autre")
+    assert moteur_po() == "ollama"
+    monkeypatch.setenv("PO_MOTEUR", " Claude ")
+    assert moteur_po() == "claude"
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _po_moteur_ollama_par_defaut(monkeypatch):
+    """Les tests ne dependent pas du .env du poste : Ollama par defaut."""
+    monkeypatch.setenv("PO_MOTEUR", "ollama")

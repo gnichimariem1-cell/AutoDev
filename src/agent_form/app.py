@@ -937,6 +937,9 @@ def _details(resultat) -> str:
         rapport = resultat.get(cle)
         if rapport is not None and not rapport.succes:
             erreurs += [str(err) for err in rapport.erreurs]
+    rapport_e2e = resultat.get("rapport_e2e")
+    if rapport_e2e is not None and rapport_e2e.docker_disponible and not rapport_e2e.succes:
+        erreurs += [str(err) for err in rapport_e2e.erreurs]
     if erreurs:
         items = "".join(f'<li style="margin-bottom:4px"><pre style="white-space:pre-wrap;margin:0;font-size:12px">{_e(err[:1500])}</pre></li>'
                         for err in erreurs[:10])

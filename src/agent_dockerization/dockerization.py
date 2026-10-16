@@ -58,6 +58,9 @@ passe PostgreSQL, compte administrateur, cle JWT...) : utilise des variables ${{
 Ecris leurs valeurs dans {dossier_sortie}/.env (valeurs aleatoires, au moins 16 caracteres
 pour les mots de passe), et les memes noms sans valeur dans {dossier_sortie}/.env.example.
 Docker Compose lit {dossier_sortie}/.env automatiquement.
+Adresses e-mail par defaut (compte administrateur, comptes de demonstration) : un domaine normal
+(ex : cabinet-medical.fr), jamais .local, .localhost, .test, .invalid ni .example : la validation
+des e-mails (EmailStr) les refuse et l'application planterait.
 
 N'execute aucune commande (pas de docker compose up, pas de docker build) : AutoDev
 construit et teste la configuration lui-meme juste apres.

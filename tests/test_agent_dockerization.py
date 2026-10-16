@@ -82,6 +82,7 @@ def test_dockerization_sans_bash_ni_secret_en_clair(mock_run):
     prompt = mock_run.call_args.kwargs["input"]
     assert "Aucun mot de passe ni secret en clair" in prompt
     assert "N'execute aucune commande" in prompt
+    assert "jamais .local" in prompt  # ADMIN_EMAIL en .local : connexion en 500 (trouve par l'Agent E2E)
 
 
 def test_dockerfile_autodev_sans_tampon():

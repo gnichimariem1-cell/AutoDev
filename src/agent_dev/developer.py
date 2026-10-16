@@ -33,6 +33,7 @@ un autre port (ex : http://localhost:8080), puisse appeler l'API.
 
 Inclus également :
 - un fichier .env.example listant les variables necessaires (DATABASE_URL, SECRET_KEY, etc.)
+- Adresses e-mail par defaut (compte administrateur, comptes de demonstration) : un domaine normal (ex : cabinet-medical.fr), jamais .local, .localhost, .test, .invalid ni .example : la validation des e-mails (EmailStr) les refuse et l'application planterait.
 - un README.md qui documente comment lancer l'API : variables d'environnement, creation
   ou migration du schema de la base, initialisation eventuelle (ex : compte admin) et
   commande de demarrage (uvicorn sur le port 8000)

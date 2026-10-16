@@ -117,3 +117,5 @@ class RapportE2E(BaseModel):
     echecs: list[EchecE2E] = []
     erreurs: list[str] = []
     erreur_environnement: bool = False
+    navigateur: bool = True  # False : Chromium absent, seuls les scenarios API ont ete lances
+    remarque: str = ""

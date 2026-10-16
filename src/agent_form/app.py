@@ -203,7 +203,7 @@ def _section_agent_e2e(resultat) -> str:
         return "9. Agent E2E\n   (non atteint)\n"
     if not plan.active:
         return "9. Agent E2E — NON EFFECTUE (desactive ou Docker non joignable)\n"
-    lignes = [f"   - {s.id} {s.user_story} : {s.description}" for s in plan.scenarios]
+    lignes = [f"   - {s.id} [{s.type}] {s.user_story} : {s.description}" for s in plan.scenarios]
     return f"9. Agent E2E — OK ({len(plan.scenarios)} scenarios)\n" + "\n".join(lignes) + "\n"
 
 
@@ -215,6 +215,8 @@ def _section_tests_e2e(resultat) -> str:
         return "10. Tests E2E — NON EFFECTUES\n   " + " ".join(rapport.erreurs) + "\n"
     statut = "OK" if rapport.succes else "SCENARIOS EN ECHEC (rapport, le run n'est pas bloque)"
     texte = f"10. Tests E2E — {statut} : {rapport.reussis}/{rapport.total} scenarios reussis\n"
+    if rapport.remarque:
+        texte += f"   {rapport.remarque}\n"
     if not rapport.succes:
         texte += "   Erreurs :\n" + "\n".join(f"     - {e[:500]}" for e in rapport.erreurs) + "\n"
     return texte
@@ -632,8 +634,8 @@ MESSAGES_ETAPE = {
     "QA Frontend": "Le QA verifie le frontend.",
     "Dockerization": "Le Dockerization Agent ecrit le Dockerfile et le docker-compose.",
     "Validation Docker": "Le Docker Validation Agent construit et demarre l'application pour verifier qu'elle marche.",
-    "Agent E2E": "L'Agent E2E ecrit des scenarios qui utilisent l'API comme un vrai utilisateur.",
-    "Tests E2E": "AutoDev demarre l'application et joue les scenarios E2E sur la vraie API.",
+    "Agent E2E": "L'Agent E2E ecrit des scenarios qui utilisent l'application comme un vrai utilisateur (API et navigateur).",
+    "Tests E2E": "AutoDev demarre l'application et joue les scenarios E2E (API et navigateur Chromium).",
 }
 CORRECTEURS = {"QA Backend": "le Developer corrige le code",
                "QA Frontend": "le Frontend Agent corrige l'interface",
@@ -833,13 +835,15 @@ def _resume_etape(libelle, resultat) -> str:
             plan = resultat["plan_e2e"]
             if not plan.active:
                 return "non effectue : desactive ou Docker non joignable"
-            return f"{len(plan.scenarios)} scenarios sur la vraie API"
+            n_api = sum(1 for s in plan.scenarios if s.type == "api")
+            return f"{len(plan.scenarios)} scenarios · {n_api} API, {len(plan.scenarios) - n_api} interface"
         if libelle == "Tests E2E":
             r = resultat["rapport_e2e"]
             if not r.docker_disponible:
                 return "non effectues : " + " ".join(r.erreurs)
             echecs = ", ".join(e.id for e in r.echecs)
-            return f"{r.reussis}/{r.total} scenarios reussis" + (f" · en echec : {echecs}" if echecs else "")
+            texte = f"{r.reussis}/{r.total} scenarios reussis" + (f" · en echec : {echecs}" if echecs else "")
+            return texte + ("" if r.navigateur else " · API seulement (navigateur absent)")
     except (KeyError, AttributeError, TypeError):
         return ""
     return ""

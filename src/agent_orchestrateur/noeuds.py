@@ -219,7 +219,7 @@ def _demande_complete(besoin) -> str:
 
 @_proteger("generation_e2e")
 def noeud_generation_e2e(etat: EtatPipeline) -> dict:
-    """L'Agent E2E ecrit des scenarios qui utilisent l'API comme un vrai utilisateur."""
+    """L'Agent E2E ecrit des scenarios qui utilisent l'application comme un vrai utilisateur (API et navigateur)."""
     validation = etat.get("rapport_validation_docker")
     if not e2e_actif():
         logger.info("[E2E] Agent E2E : desactive (E2E_ACTIF=0 dans .env)")
@@ -227,9 +227,10 @@ def noeud_generation_e2e(etat: EtatPipeline) -> dict:
     if validation is not None and not validation.docker_disponible:
         logger.warning("[E2E] Agent E2E : Docker non joignable, scenarios non ecrits")
         return {"plan_e2e": SortieAgentE2E(active=False)}
-    logger.info("[E2E] Agent E2E : demarrage (scenarios sur la vraie API)")
+    logger.info("[E2E] Agent E2E : demarrage (scenarios API et navigateur)")
     plan = generer_tests_e2e(etat["user_stories"], _demande_complete(etat["besoin"]),
-                             etat["dossier_backend"], dossier_e2e(etat["dossier_docker"]))
+                             etat["dossier_backend"], dossier_e2e(etat["dossier_docker"]),
+                             dossier_frontend=etat["dossier_frontend"])
     logger.info("[E2E] Agent E2E : OK (%d scenarios)", len(plan.scenarios))
     return {"plan_e2e": plan}
 

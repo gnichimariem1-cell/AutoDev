@@ -15,6 +15,8 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# Navigateur Chromium pour les scenarios d'interface de l'Agent E2E (environ 400 Mo)
+RUN python -m playwright install --with-deps chromium
 
 COPY . .
 

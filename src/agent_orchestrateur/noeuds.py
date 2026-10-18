@@ -26,8 +26,11 @@ from src.agent_frontend.frontend import generer_frontend, appliquer_corrections_
 from src.agent_qa.qa import lancer_tests, lancer_tests_frontend
 from src.agent_dockerization.dockerization import generer_dockerisation, appliquer_corrections_dockerisation
 from src.agent_validation_docker.validation_docker import valider_dockerisation
-from src.agent_e2e.e2e import generer_tests_e2e, executer_tests_e2e, dossier_e2e
-from src.common.schemas import SortieAgentE2E, RapportE2E
+from src.agent_e2e.e2e import (
+    generer_tests_e2e, executer_tests_e2e, dossier_e2e, lire_tests_e2e, restaurer_tests_e2e,
+    cause_de_l_echec, consignes_de_correction, corriger_scenarios_e2e,
+)
+from src.common.schemas import SortieAgentE2E, RapportE2E, EchecE2E
 from src.agent_orchestrateur.etat import EtatPipeline, MAX_TENTATIVES
 
 logger = configurer_logging()
@@ -228,22 +231,73 @@ def noeud_generation_e2e(etat: EtatPipeline) -> dict:
         logger.warning("[E2E] Agent E2E : Docker non joignable, scenarios non ecrits")
         return {"plan_e2e": SortieAgentE2E(active=False)}
     logger.info("[E2E] Agent E2E : demarrage (scenarios API et navigateur)")
+    dossier = dossier_e2e(etat["dossier_docker"])
     plan = generer_tests_e2e(etat["user_stories"], _demande_complete(etat["besoin"]),
-                             etat["dossier_backend"], dossier_e2e(etat["dossier_docker"]),
-                             dossier_frontend=etat["dossier_frontend"])
+                             etat["dossier_backend"], dossier, dossier_frontend=etat["dossier_frontend"])
     logger.info("[E2E] Agent E2E : OK (%d scenarios)", len(plan.scenarios))
-    return {"plan_e2e": plan}
+    # Version de reference des scenarios : un autre agent ne pourra pas les modifier
+    return {"plan_e2e": plan, "e2e_originaux": lire_tests_e2e(dossier)}
+
+
+# Erreurs du lancement de l'application : envoyees au Developer comme un scenario en echec
+DEBUTS_ERREUR_DEMARRAGE = ("demarrage de l'application", "l'application ne repond pas")
+
+
+def _controles_apres_correction(etat: EtatPipeline, maj: dict) -> list[EchecE2E]:
+    """Apres une correction, les controles d'avant (tests unitaires du Test Agent, QA
+    frontend) doivent toujours passer. Renvoie les echecs a corriger."""
+    echecs = []
+    if etat.get("tests_originaux"):
+        restaurer_tests(etat["dossier_backend"], etat["tests_originaux"])
+    qa = lancer_tests(etat["dossier_backend"])
+    maj["rapport_backend"] = qa
+    if not qa.succes:
+        echecs.append(EchecE2E(id="tests unitaires", type="api", test="backend/tests/", cause="application",
+                               message="Les tests unitaires du backend ne passent plus apres la correction :\n"
+                                       + "\n".join(qa.erreurs)[-1500:]))
+    qa_front = lancer_tests_frontend(etat["dossier_frontend"])
+    maj["rapport_frontend"] = qa_front
+    if not qa_front.succes:
+        echecs.append(EchecE2E(id="QA frontend", type="interface", test="frontend/", cause="application",
+                               message="Le controle du frontend echoue apres la correction :\n"
+                                       + "\n".join(qa_front.erreurs)[-1500:]))
+    return echecs
 
 
 @_proteger("e2e")
 def noeud_e2e(etat: EtatPipeline) -> dict:
-    """AutoDev demarre l'application et joue les scenarios E2E (sans IA). Rapport seulement."""
+    """AutoDev demarre l'application et joue les scenarios E2E (sans IA)."""
+    tentative = etat.get("tentative_e2e", 0) + 1
     plan = etat.get("plan_e2e")
     if plan is None or not plan.active:
         raison = "desactives (E2E_ACTIF=0)" if not e2e_actif() else "non effectues : Docker n'est pas joignable"
-        return {"rapport_e2e": RapportE2E(docker_disponible=False, succes=False, erreurs=[f"Tests E2E {raison}."])}
-    logger.info("[E2E] Tests E2E : demarrage de l'application et des scenarios")
-    rapport = executer_tests_e2e(etat["dossier_docker"], dossier_e2e(etat["dossier_docker"]))
+        return {"rapport_e2e": RapportE2E(docker_disponible=False, succes=False, erreurs=[f"Tests E2E {raison}."]),
+                "tentative_e2e": tentative}
+    dossier = dossier_e2e(etat["dossier_docker"])
+    maj = {"tentative_e2e": tentative}
+    # Les scenarios appartiennent a l'Agent E2E : si un autre agent les a modifies, on remet la reference
+    touches = restaurer_tests_e2e(dossier, etat["e2e_originaux"]) if etat.get("e2e_originaux") else []
+    if touches:
+        logger.warning("[E2E] scenarios modifies par une correction, version de reference restauree : %s", touches)
+    if tentative > 1:
+        echecs = _controles_apres_correction(etat, maj)
+        if echecs:
+            precedent = etat["rapport_e2e"]
+            logger.warning("[E2E] controles en echec apres la correction : %s", [e.id for e in echecs])
+            maj["rapport_e2e"] = RapportE2E(
+                docker_disponible=True, succes=False, total=precedent.total, reussis=precedent.reussis,
+                echecs=echecs, erreurs=[f"{e.id} : {e.message}" for e in echecs],
+                navigateur=precedent.navigateur, remarque=precedent.remarque)
+            return maj
+    logger.info("[E2E] Tests E2E : tentative %d/%d (demarrage de l'application et des scenarios)",
+                tentative, MAX_TENTATIVES)
+    rapport = executer_tests_e2e(etat["dossier_docker"], dossier)
+    if (rapport.docker_disponible and not rapport.succes and not rapport.echecs
+            and not rapport.erreur_environnement and rapport.erreurs
+            and rapport.erreurs[0].startswith(DEBUTS_ERREUR_DEMARRAGE)):
+        rapport = rapport.model_copy(update={"echecs": [EchecE2E(
+            id="demarrage", type="api", test="docker compose up", cause="application",
+            message="\n".join(rapport.erreurs)[-1500:])]})
     if not rapport.docker_disponible:
         logger.warning("[E2E] Tests E2E : non effectues (%s)", " ".join(rapport.erreurs))
     elif rapport.succes:
@@ -251,7 +305,37 @@ def noeud_e2e(etat: EtatPipeline) -> dict:
     else:
         logger.warning("[E2E] Tests E2E : %d/%d scenarios reussis — %s",
                        rapport.reussis, rapport.total, [e.id for e in rapport.echecs])
-    return {"rapport_e2e": rapport}
+    if rapport.erreur_environnement:
+        logger.warning("[E2E] Tests E2E : probleme sur la machine — %s", " ".join(rapport.erreurs))
+        maj["etape"] = "e2e"
+    maj["rapport_e2e"] = rapport
+    return maj
+
+
+@_proteger("correction_e2e")
+def noeud_correction_e2e(etat: EtatPipeline) -> dict:
+    """Chaque scenario en echec part vers celui qui peut le corriger :
+    - le code du scenario plante -> l'Agent E2E corrige son scenario ;
+    - l'application ne fait pas ce qui est attendu -> Developer (API) ou Frontend Agent (interface)."""
+    rapport = etat["rapport_e2e"]
+    groupes = {"scenario": [], "api": [], "interface": []}
+    for echec in rapport.echecs:
+        groupes["scenario" if cause_de_l_echec(echec) == "scenario" else echec.type].append(echec)
+    logger.warning("[E2E] Tests E2E : echec tentative %d/%d — correction en cours — scenarios : %s, API : %s, "
+                   "interface : %s", etat["tentative_e2e"], MAX_TENTATIVES,
+                   *([e.id for e in groupes[g]] for g in ("scenario", "api", "interface")))
+    maj = {}
+    if groupes["scenario"]:
+        dossier = dossier_e2e(etat["dossier_docker"])
+        corriger_scenarios_e2e(groupes["scenario"], dossier, etat["dossier_backend"], etat["dossier_frontend"])
+        maj["e2e_originaux"] = lire_tests_e2e(dossier)  # nouvelle version de reference, ecrite par l'Agent E2E
+    if groupes["api"]:
+        maj["sortie_dev"] = appliquer_corrections(consignes_de_correction(groupes["api"], "api"),
+                                                  etat["dossier_backend"])
+    if groupes["interface"]:
+        maj["sortie_frontend"] = appliquer_corrections_frontend(
+            consignes_de_correction(groupes["interface"], "interface"), etat["dossier_frontend"])
+    return maj
 
 
 # Pour chaque etape pouvant echouer : (cle du rapport, cle du compteur)
@@ -259,6 +343,7 @@ _RAPPORTS_PAR_ETAPE = {
     "backend": ("rapport_backend", "tentative_backend"),
     "frontend": ("rapport_frontend", "tentative_frontend"),
     "docker": ("rapport_validation_docker", "tentative_docker"),
+    "e2e": ("rapport_e2e", "tentative_e2e"),
 }
 
 

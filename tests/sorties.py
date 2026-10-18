@@ -33,5 +33,5 @@ PLAN_E2E = SortieAgentE2E(scenarios=[
 ], fichiers=["output/e2e/test_api_e2e.py"])
 E2E_OK = RapportE2E(docker_disponible=True, succes=True, total=2, reussis=2)
 E2E_KO = RapportE2E(docker_disponible=True, succes=False, total=2, reussis=1, echecs=[
-    EchecE2E(id="E02", test="test_api_e2e.py::test_E02", message="attendu 422, obtenu 201")],
+    EchecE2E(id="E02", test="test_api_e2e.py::test_E02", message="E   AssertionError: attendu 422, obtenu 201")],
     erreurs=["E02 : attendu 422, obtenu 201"])

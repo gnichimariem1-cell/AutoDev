@@ -43,3 +43,21 @@ def router_validation_docker(etat: EtatPipeline) -> str:
     if rapport.erreur_environnement or etat["tentative_docker"] >= MAX_TENTATIVES:
         return "abandon"
     return "corriger"
+
+
+def router_e2e(etat: EtatPipeline) -> str:
+    """Apres les tests E2E : "fin" (le run se termine en succes, les scenarios encore en
+    echec restent dans le rapport), "corriger", ou "abandon" si un agent a plante."""
+    if etat.get("erreur"):
+        return "abandon"
+    rapport = etat["rapport_e2e"]
+    if not rapport.docker_disponible or rapport.succes:
+        return "fin"
+    # Erreur de la machine (ex : port occupe) : arret, le run sera repris avec Relancer
+    if rapport.erreur_environnement:
+        return "abandon"
+    if not rapport.echecs:
+        return "fin"
+    if etat.get("tentative_e2e", 1) >= MAX_TENTATIVES:
+        return "fin"
+    return "corriger"

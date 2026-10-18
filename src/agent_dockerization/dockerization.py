@@ -39,8 +39,9 @@ projet AutoDev qui a deja son propre docker-compose.yml) :
   {dossier_backend}/requirements.txt, expose le port 8000, utilisateur non-root
   pour executer l'application)
 - un docker-compose.yml avec 3 services : "app" (le backend, build depuis le
-  Dockerfile ci-dessus), "frontend" (sert les fichiers statiques de
-  {dossier_frontend}, par exemple via nginx:alpine ou un serveur simple), et "db"
+  Dockerfile ci-dessus), "frontend" (image construite depuis {dossier_frontend}/Dockerfile,
+  que tu ecris : FROM nginx:alpine puis COPY des fichiers statiques dans /usr/share/nginx/html ;
+  dans docker-compose.yml : build avec context ./frontend), et "db"
   (postgres:16, volume nomme pour persister les donnees)
 - un fichier .dockerignore adapte
 
@@ -61,6 +62,12 @@ Docker Compose lit {dossier_sortie}/.env automatiquement.
 Adresses e-mail par defaut (compte administrateur, comptes de demonstration) : un domaine normal
 (ex : cabinet-medical.fr), jamais .local, .localhost, .test, .invalid ni .example : la validation
 des e-mails (EmailStr) les refuse et l'application planterait.
+Aucun volume qui monte un dossier du projet (ex : ./frontend:/usr/share/nginx/html ou ./backend:/app) :
+le code et les pages sont COPIES dans les images (COPY dans un Dockerfile). L'application est aussi
+lancee par un Docker qui ne voit pas ces dossiers (conteneur AutoDev, autre poste) : un dossier monte y
+serait vide et nginx repondrait 404. Seuls les volumes nommes (ex : db_data) sont autorises.
+Ecris aussi {dossier_frontend}/.dockerignore (au moins Dockerfile et .dockerignore) : sinon nginx servirait
+le Dockerfile comme une page du site.
 
 N'execute aucune commande (pas de docker compose up, pas de docker build) : AutoDev
 construit et teste la configuration lui-meme juste apres.

@@ -127,3 +127,40 @@ def test_sec07_dockerfile_en_root_refuse(mock_compose, tmp_path, dockerfile):
 def test_sec07_utilisateur_final():
     assert validation_docker.utilisateur_final("FROM a\nUSER app\nFROM b\nUSER web") == "web"
     assert validation_docker.utilisateur_final("FROM a\nRUN x") is None
+
+
+# Trouve par l'Agent E2E (run Cabinet medical) : le frontend montait ./frontend par un volume.
+# Lance depuis le conteneur AutoDev, le dossier etait vide et nginx repondait 404,
+# mais la Validation Docker acceptait (404 < 500).
+
+@patch.object(validation_docker, "_commande_compose", return_value=["docker", "compose"])
+def test_dossier_monte_par_un_volume_refuse(mock_compose, tmp_path):
+    config = {"services": {
+        "app": {"ports": [{"target": 8000, "published": "8000"}]},
+        "frontend": {"ports": [{"target": 80, "published": "8080"}], "volumes": [
+            {"type": "bind", "source": "/app/output/frontend", "target": "/usr/share/nginx/html"}]},
+        "db": {"volumes": [{"type": "volume", "source": "db_data", "target": "/var/lib/postgresql/data"}]},
+    }}
+    faux = MagicMock(return_value=MagicMock(returncode=0, stdout=json.dumps(config), stderr=""))
+    with patch.object(validation_docker, "_executer", faux):
+        rapport = valider_dockerisation(_dossier_docker(tmp_path))
+
+    assert rapport.succes is False and rapport.erreur_environnement is False  # envoye au Dockerization Agent
+    assert "frontend : /app/output/frontend -> /usr/share/nginx/html" in rapport.erreurs[0]
+    assert "db :" not in rapport.erreurs[0]  # un volume nomme (db_data) est autorise
+    assert "COPY" in rapport.erreurs[0]
+
+
+@patch.object(validation_docker, "_attendre_reponse_http", return_value=None)
+@patch.object(validation_docker, "_commande_compose", return_value=["docker", "compose"])
+def test_frontend_doit_repondre_200(mock_compose, mock_http, tmp_path):
+    with patch.object(validation_docker, "_executer", _faux_compose()):
+        valider_dockerisation(_dossier_docker(tmp_path))
+    mock_http.assert_any_call("http://localhost:8080/", validation_docker.DEMARRAGE_TIMEOUT, exige_200=True)
+
+
+def test_reponse_404_refusee_seulement_si_200_exige():
+    with patch.object(validation_docker.requests, "get", return_value=MagicMock(status_code=404)), \
+            patch.object(validation_docker.time, "sleep"):
+        assert validation_docker._attendre_reponse_http("http://x/", 0.05) is None
+        assert validation_docker._attendre_reponse_http("http://x/", 0.05, exige_200=True) == "code HTTP 404"

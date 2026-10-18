@@ -213,8 +213,10 @@ def _section_tests_e2e(resultat) -> str:
         return "10. Tests E2E\n   (non atteint)\n"
     if not rapport.docker_disponible:
         return "10. Tests E2E — NON EFFECTUES\n   " + " ".join(rapport.erreurs) + "\n"
-    statut = "OK" if rapport.succes else "SCENARIOS EN ECHEC (rapport, le run n'est pas bloque)"
-    texte = f"10. Tests E2E — {statut} : {rapport.reussis}/{rapport.total} scenarios reussis\n"
+    tentative = resultat.get("tentative_e2e", 1)
+    statut = "OK" if rapport.succes else "SCENARIOS EN ECHEC (le run n'est pas bloque)"
+    texte = (f"10. Tests E2E — {statut} : {rapport.reussis}/{rapport.total} scenarios reussis "
+             f"(essai {tentative}/{MAX_TENTATIVES})\n")
     if rapport.remarque:
         texte += f"   {rapport.remarque}\n"
     if not rapport.succes:
@@ -255,6 +257,7 @@ LIBELLES_NOEUDS = {
     "correction_docker": "Correction de la config Docker",
     "generation_e2e": "Agent E2E",
     "e2e": "Tests E2E",
+    "correction_e2e": "Correction apres les tests E2E",
     "echec": "Arret du pipeline",
 }
 
@@ -528,7 +531,8 @@ ETAPES_BARRE = [
     ("e2e", "Tests E2E", "rapport_e2e"),
 ]
 # Etape d'echec final (cle "etape" de l'etat) -> noeud du controle concerne
-ETAPE_ECHEC_VERS_NOEUD = {"backend": "qa_backend", "frontend": "qa_frontend", "docker": "validation_docker"}
+ETAPE_ECHEC_VERS_NOEUD = {"backend": "qa_backend", "frontend": "qa_frontend", "docker": "validation_docker",
+                          "e2e": "e2e"}
 STYLES_ETAT = {
     "ok": ("#ECFDF5", "#10B981", "#047857", "✓ "),
     "en_cours": ("#FFF7ED", "#F97316", "#C2410C", "⏳ "),
@@ -567,12 +571,19 @@ def etats_des_etapes(resultat) -> list[tuple[str, str, str]]:
                 else:
                     etat, detail = "attention", "non effectue"
             elif noeud == "e2e":
-                # Rapport seulement : un scenario en echec ne fait pas echouer le run
+                # Un scenario encore en echec apres les corrections ne fait pas echouer le run
                 if not valeur.docker_disponible:
                     etat, detail = "attention", "non effectues"
                 else:
                     detail = f"{valeur.reussis}/{valeur.total}"
-                    if not valeur.succes:
+                    tentative = resultat.get("tentative_e2e", 1)
+                    if (not valeur.succes and en_cours and valeur.echecs and not valeur.erreur_environnement
+                            and tentative < MAX_TENTATIVES):
+                        etat, detail = "en_cours", f"correction · tentative {tentative}/{MAX_TENTATIVES}"
+                        actif_trouve = True
+                    elif not valeur.succes and noeud == echec_final and valeur.erreur_environnement:
+                        etat, detail = "ko", "machine"
+                    elif not valeur.succes:
                         etat = "attention"
             if noeud in ("qa_backend", "qa_frontend", "validation_docker") and not valeur.succes:
                 tentative = resultat.get(
@@ -620,7 +631,8 @@ def barre_etapes(resultat) -> str:
 # --- Interface : onglets « Run en cours » et « Runs existants » ---
 COLONNES_HISTORIQUE = ["Projet", "Date", "Resultat", "Arret a"]
 ETAPES_ECHEC_LISIBLES = {"backend": "QA Backend", "frontend": "QA Frontend", "docker": "Validation Docker",
-                         "docker (machine)": "Validation Docker (machine)"}
+                         "docker (machine)": "Validation Docker (machine)", "e2e": "Tests E2E",
+                         "e2e (machine)": "Tests E2E (machine)"}
 COULEURS_STATUT = {"SUCCES": ("#ECFDF5", "#047857"), "ECHEC": ("#FEF2F2", "#B91C1C"),
                    "PLANTAGE": ("#FEF2F2", "#B91C1C"), "INTERROMPU": ("#FFF7ED", "#C2410C"),
                    "EN COURS": ("#FFF7ED", "#C2410C")}
@@ -639,7 +651,9 @@ MESSAGES_ETAPE = {
 }
 CORRECTEURS = {"QA Backend": "le Developer corrige le code",
                "QA Frontend": "le Frontend Agent corrige l'interface",
-               "Validation Docker": "le Dockerization Agent corrige la configuration"}
+               "Validation Docker": "le Dockerization Agent corrige la configuration",
+               "Tests E2E": "chaque scenario part vers celui qui peut le corriger (Agent E2E, Developer "
+                            "ou Frontend Agent)"}
 # Style de la page (passe a demo.launch : Gradio 6)
 CSS_AUTODEV = """
 .carte { background: #FFFFFF !important; border: 1px solid #E5E7EB !important;
@@ -843,6 +857,9 @@ def _resume_etape(libelle, resultat) -> str:
                 return "non effectues : " + " ".join(r.erreurs)
             echecs = ", ".join(e.id for e in r.echecs)
             texte = f"{r.reussis}/{r.total} scenarios reussis" + (f" · en echec : {echecs}" if echecs else "")
+            essais = resultat.get("tentative_e2e", 1)
+            if essais > 1:
+                texte += f" · corriges en {essais} essais" if r.succes else f" · apres {essais} essais"
             return texte + ("" if r.navigateur else " · API seulement (navigateur absent)")
     except (KeyError, AttributeError, TypeError):
         return ""
@@ -936,6 +953,18 @@ def _details(resultat) -> str:
         blocs.append(("Architecture", len(archi.structure_modules),
                       f'<div style="font-size:13px;color:#111827"><b>Stack :</b> {_e(", ".join(archi.stack_technique))}'
                       f'<ul style="margin:6px 0 0 18px">{modules}</ul></div>'))
+    plan_e2e = resultat.get("plan_e2e")
+    if plan_e2e and plan_e2e.scenarios:
+        rapport_e2e = resultat.get("rapport_e2e")
+        joues = bool(rapport_e2e and rapport_e2e.docker_disponible and rapport_e2e.total)
+        en_echec = {e.id for e in rapport_e2e.echecs} if joues else set()
+        lignes = "".join(
+            f"<tr><td {style_td}>{_e(s.id)}</td><td {style_td}>{_e(s.type)}</td><td {style_td}>{_e(s.user_story)}</td>"
+            f"<td {style_td}>{_e(s.description)}</td><td {style_td}>"
+            f"{('✗ echec' if s.id in en_echec else '✓ OK') if joues else '—'}</td></tr>" for s in plan_e2e.scenarios)
+        blocs.append(("Scenarios E2E (Agent E2E)", len(plan_e2e.scenarios),
+                      f"<table {style_table}><tr><th {style_th}>ID</th><th {style_th}>Type</th><th {style_th}>US</th>"
+                      f"<th {style_th}>Scenario</th><th {style_th}>Resultat</th></tr>{lignes}</table>"))
     erreurs = []
     for cle in ("rapport_backend", "rapport_frontend", "rapport_validation_docker"):
         rapport = resultat.get(cle)
@@ -1120,14 +1149,22 @@ def _etat_pour_le_suivi(resultat):
     id_actif = _run_actif.id_run
     if resultat and resultat.get("_en_cours"):
         return resultat
+    depart = _DEPART_DU_RUN.get(id_actif)
+    base = None
     if resultat and id_actif and resultat.get("id_run") == id_actif:
+        base = resultat
+    elif id_actif and depart:
+        # Relance alors que la page suivait un autre run (ou rien, apres un
+        # rechargement) : on part de l'etat sauvegarde du run relance, sinon
+        # l'affichage repartirait du Product Owner.
+        base = etat_du_run(id_actif) or None
+    if base:
         # Relance : on garde les etapes d'avant, et on efface de l'affichage
         # l'etape relancee et les suivantes (leur ancien resultat n'est plus valable).
-        etat = dict(resultat, _en_cours="demarrage")
+        etat = dict(base, id_run=id_actif, _en_cours="demarrage")
         for cle in ("erreur", "etape", "succes"):
             etat.pop(cle, None)
         noeuds = [noeud for noeud, _, _ in ETAPES_BARRE]
-        depart = _DEPART_DU_RUN.get(id_actif)
         if depart in noeuds:
             for _, _, cle in ETAPES_BARRE[noeuds.index(depart):]:
                 etat.pop(cle, None)

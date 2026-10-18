@@ -1,4 +1,4 @@
-"""Agent E2E (etape 2 : API + navigateur, rapport seulement) : teste l'application
+"""Agent E2E (etape 3 : API + navigateur + boucle de correction) : teste l'application
 generee de bout en bout, comme un vrai utilisateur.
 
 Deux parties, comme le Test Agent et le QA :
@@ -18,8 +18,18 @@ host.docker.internal, mais le frontend genere appelle l'API sur localhost : un
 relais TCP rend les ports de l'application joignables sur localhost dans le
 conteneur AutoDev, pour que le navigateur se comporte comme celui d'un utilisateur.
 
-Le resultat est un rapport : il ne bloque pas le run et ne declenche pas de
-correction (ce sera l'etape 3).
+3. Boucle de correction (etape 3) : chaque scenario en echec part vers celui qui
+   peut le corriger, selon la cause de l'erreur (cause_de_l_echec) :
+   - le code du scenario plante (erreur Python dans le test) -> l'Agent E2E corrige
+     son scenario, sans changer ce qu'il verifie ;
+   - l'application ne fait pas ce qui est attendu : scenario API -> Developer,
+     scenario d'interface -> Frontend Agent.
+   Les scenarios sont proteges (restaurer_tests_e2e) : un autre agent ne peut pas
+   les modifier pour les faire passer.
+
+Les scenarios encore en echec apres MAX_TENTATIVES essais restent dans le rapport :
+ils ne bloquent pas le run (l'application a deja passe les tests unitaires et la
+Validation Docker).
 """
 import json
 import os
@@ -110,6 +120,28 @@ def lister_tests_e2e(dossier: str) -> list[str]:
     return sorted(str(f) for f in Path(dossier).glob("test_*.py"))
 
 
+def lire_tests_e2e(dossier: str) -> dict[str, str]:
+    """Contenu de chaque scenario : empreinte pour detecter (et annuler) une modification par un autre agent."""
+    return {f: Path(f).read_text(encoding="utf-8", errors="replace") for f in lister_tests_e2e(dossier)}
+
+
+def restaurer_tests_e2e(dossier: str, originaux: dict[str, str]) -> list[str]:
+    """Remet les scenarios de reference (et les fichiers d'AutoDev). Renvoie les
+    fichiers de scenarios qui avaient ete modifies, supprimes ou ajoutes."""
+    touches = []
+    actuels = lire_tests_e2e(dossier)
+    for chemin in set(actuels) - set(originaux):
+        Path(chemin).unlink()
+        touches.append(chemin)
+    for chemin, contenu in originaux.items():
+        if actuels.get(chemin) != contenu:
+            Path(chemin).parent.mkdir(parents=True, exist_ok=True)
+            Path(chemin).write_text(contenu, encoding="utf-8")
+            touches.append(chemin)
+    ecrire_fichiers_autodev(dossier)
+    return sorted(touches)
+
+
 # --- 1. Ecriture des scenarios par l'IA ---
 
 def _extraire_json(texte: str) -> str:
@@ -160,6 +192,9 @@ Regles :
   marche dans n'importe quel ordre ;
 - nom de chaque test : `test_E01_...`, `test_E02_...` (numerotation unique sur les deux fichiers) ;
 - pas de `time.sleep` de plus d'une seconde : `expect(...)` attend tout seul ;
+- httpx : un client deja utilise ne peut pas etre rouvert avec `with` (RuntimeError) ; une fonction
+  utilitaire qui connecte un compte renvoie un client deja ouvert, utilise-le sans `with` puis ferme-le
+  avec `.close()` ;
 - chaque assertion a un message clair en francais : ce qui etait attendu et ce qui a ete obtenu
   (par exemple le code HTTP et le debut de la reponse) ;
 - ne modifie ni conftest.py ni pytest.ini, n'ecris dans aucun autre dossier, ne modifie pas l'application ;
@@ -309,6 +344,71 @@ def lancer_scenarios(fichiers: list[str], dossier: str, api_url: str, fichier_en
         erreurs.append("Aucun scenario E2E n'a ete trouve.")
     return RapportE2E(docker_disponible=True, succes=not erreurs, total=total, reussis=reussis,
                       echecs=echecs, erreurs=erreurs)
+
+
+# --- 3. Boucle de correction ---
+
+# Erreurs qui montrent que l'APPLICATION ne fait pas ce qui est attendu : assertion
+# fausse, element absent de la page (Playwright attend puis abandonne), API injoignable.
+# Toute autre erreur (RuntimeError, NameError, TypeError, fixture inconnue...) vient
+# du code du scenario lui-meme.
+ERREURS_DE_L_APPLICATION = {
+    "AssertionError", "TimeoutError", "ConnectError", "ConnectTimeout", "ReadTimeout",
+    "ReadError", "RemoteProtocolError",
+}
+
+
+def cause_de_l_echec(echec: EchecE2E) -> str:
+    """"application" ou "scenario" (voir ERREURS_DE_L_APPLICATION)."""
+    if echec.cause:
+        return echec.cause
+    if echec.id == "collecte":  # fichier de scenarios illisible (syntaxe, import)
+        return "scenario"
+    noms = re.findall(r"^E\s+([\w.]+(?:Error|Exception|Timeout))\b", echec.message, re.MULTILINE)
+    if noms:
+        return "application" if noms[0].split(".")[-1] in ERREURS_DE_L_APPLICATION else "scenario"
+    return "application" if any(nom in echec.message for nom in ERREURS_DE_L_APPLICATION) else "scenario"
+
+
+def consignes_de_correction(echecs: list[EchecE2E], type_echec: str) -> list[str]:
+    """Erreurs transmises au Developer ("api") ou au Frontend Agent ("interface")."""
+    if type_echec == "interface":
+        intro = ("Tests de bout en bout (E2E) : l'application a ete demarree avec Docker et utilisee dans un vrai "
+                 "navigateur Chromium (Playwright). Ces parcours echouent : corrige les pages (HTML, CSS, JavaScript) "
+                 "pour qu'ils marchent. Les scenarios sont dans le dossier e2e/ : ne les modifie pas.")
+    else:
+        intro = ("Tests de bout en bout (E2E) : l'application a ete demarree avec Docker (vraie base PostgreSQL) "
+                 "et son API utilisee comme par un vrai utilisateur. Ces scenarios echouent : corrige le code de "
+                 "l'application. Les scenarios sont dans le dossier e2e/ : ne les modifie pas. Les tests unitaires "
+                 "(tests/) doivent continuer a passer.")
+    return [intro] + [f"[E2E {e.type}] {e.id} ({e.test}) : {e.message}" for e in echecs]
+
+
+def corriger_scenarios_e2e(echecs: list[EchecE2E], dossier: str = "output/e2e",
+                           dossier_backend: str = "output/backend", dossier_frontend: str = "output/frontend") -> None:
+    """L'Agent E2E corrige SES scenarios quand c'est leur code qui plante (pas l'application)."""
+    erreurs = "\n\n".join(f"{e.id} ({e.test}) :\n{e.message}" for e in echecs)
+    consigne = f"""Tu es l'Agent E2E. Ces scenarios de {dossier}/ plantent a cause de leur PROPRE code Python,
+pas a cause de l'application :
+
+{erreurs}
+
+Relis le code de l'application ({dossier_backend}/ et {dossier_frontend}/) et {dossier}/conftest.py, puis corrige
+UNIQUEMENT le code de ces scenarios.
+Regles :
+- ne change pas ce qu'ils verifient : memes URL, memes codes de reponse, memes textes attendus ;
+- ne supprime aucun scenario et n'en affaiblis aucun (pas de `pytest.skip`, pas d'assertion retiree) ;
+- httpx : un client deja utilise ne peut pas etre rouvert avec `with` ;
+- ne modifie ni conftest.py, ni pytest.ini, ni les autres scenarios, ni l'application ;
+- n'execute aucune commande : AutoDev relance les scenarios lui-meme."""
+    resultat = subprocess.run(
+        [CLAUDE_BIN, "-p", "--allowedTools", "Read,Write,Edit,Glob,Grep"],
+        input=consigne, capture_output=True, text=True, timeout=int(os.environ.get("CLAUDE_TIMEOUT", 1200)),
+        encoding="utf-8", errors="replace",
+    )
+    if resultat.returncode != 0:
+        raise RuntimeError(f"Agent E2E (correction des scenarios) a échoué : {resultat.stdout}\n{resultat.stderr}")
+    ecrire_fichiers_autodev(dossier)
 
 
 def executer_tests_e2e(dossier_docker: str = "output", dossier: str | None = None) -> RapportE2E:

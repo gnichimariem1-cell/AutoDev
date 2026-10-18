@@ -59,6 +59,7 @@ def test_structure_du_graphe():
         (n, "echec") for n in [
             "po", "architect", "test_agent", "developer", "correction_backend", "revision_tests", "frontend",
             "correction_frontend", "dockerization", "correction_docker", "generation_e2e", "e2e",
+            "correction_e2e",
         ]
     }
     assert {
@@ -73,7 +74,8 @@ def test_structure_du_graphe():
         ("dockerization", "validation_docker"),
         ("validation_docker", "generation_e2e"), ("validation_docker", "correction_docker"), ("validation_docker", "echec"),
         ("correction_docker", "validation_docker"),
-        ("generation_e2e", "e2e"), ("e2e", "__end__"),
+        ("generation_e2e", "e2e"), ("e2e", "__end__"), ("e2e", "correction_e2e"),
+        ("correction_e2e", "e2e"),
         ("echec", "__end__"),
     } | plantages == aretes
 

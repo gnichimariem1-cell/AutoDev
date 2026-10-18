@@ -107,6 +107,8 @@ class EchecE2E(BaseModel):
     type: str = "api"
     test: str = ""
     message: str = ""
+    # "application" ou "scenario" ; vide : deduite du message (voir agent_e2e.cause_de_l_echec)
+    cause: str = ""
 
 class RapportE2E(BaseModel):
     """Resultat des scenarios E2E joues sur l'application demarree"""

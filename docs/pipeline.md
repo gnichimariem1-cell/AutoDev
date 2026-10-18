@@ -29,6 +29,7 @@ graph TD;
 	correction_docker(correction_docker)
 	generation_e2e(generation_e2e)
 	e2e(e2e)
+	correction_e2e(correction_e2e)
 	echec(echec)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> po;
@@ -38,13 +39,16 @@ graph TD;
 	correction_backend -. &nbsp;continuer&nbsp; .-> qa_backend;
 	correction_docker -. &nbsp;abandon&nbsp; .-> echec;
 	correction_docker -. &nbsp;continuer&nbsp; .-> validation_docker;
+	correction_e2e -. &nbsp;continuer&nbsp; .-> e2e;
+	correction_e2e -. &nbsp;abandon&nbsp; .-> echec;
 	correction_frontend -. &nbsp;abandon&nbsp; .-> echec;
 	correction_frontend -. &nbsp;continuer&nbsp; .-> qa_frontend;
 	developer -. &nbsp;abandon&nbsp; .-> echec;
 	developer -. &nbsp;continuer&nbsp; .-> qa_backend;
 	dockerization -. &nbsp;abandon&nbsp; .-> echec;
 	dockerization -. &nbsp;continuer&nbsp; .-> validation_docker;
-	e2e -. &nbsp;continuer&nbsp; .-> __end__;
+	e2e -. &nbsp;fin&nbsp; .-> __end__;
+	e2e -. &nbsp;corriger&nbsp; .-> correction_e2e;
 	e2e -. &nbsp;abandon&nbsp; .-> echec;
 	frontend -. &nbsp;abandon&nbsp; .-> echec;
 	frontend -. &nbsp;continuer&nbsp; .-> qa_frontend;

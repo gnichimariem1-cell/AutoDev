@@ -153,6 +153,12 @@ def point_de_reprise(id_run: str):
         for sauvegarde in GRAPHE.get_state_history(config):
             if sauvegarde.next == ("validation_docker",):
                 return sauvegarde
+    rapport_e2e = derniere.values.get("rapport_e2e")
+    if (rapport_e2e and rapport_e2e.erreur_environnement and not derniere.values.get("erreur")
+            and derniere.values.get("etape") == "e2e"):
+        for sauvegarde in GRAPHE.get_state_history(config):
+            if sauvegarde.next == ("e2e",):
+                return sauvegarde
     if not derniere.values.get("erreur"):
         raise RepriseImpossible(f"Le run '{id_run}' s'est termine sans plantage : rien a reprendre.")
     for sauvegarde in GRAPHE.get_state_history(config):
@@ -275,6 +281,9 @@ def historique_runs(limite: int = 30) -> list[dict]:
             validation = valeurs.get("rapport_validation_docker")
             if etape == "docker" and validation is not None and getattr(validation, "erreur_environnement", False):
                 etape = "docker (machine)"
+            e2e = valeurs.get("rapport_e2e")
+            if etape == "e2e" and e2e is not None and getattr(e2e, "erreur_environnement", False):
+                etape = "e2e (machine)"
         marqueur = Path(valeurs.get("dossier_docker", "output")) / FICHIER_ID_RUN
         archive = marqueur.exists() and marqueur.read_text().strip() != id_run
         besoin = valeurs.get("besoin")

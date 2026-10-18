@@ -17,11 +17,11 @@ AutoDev transforme une demande écrite dans un formulaire en une application web
 
 ## Le pipeline
 
-Chaque run passe par 9 étapes. L'orchestrateur transmet le travail d'un agent au suivant dans un état partagé et le sauvegarde après chaque étape.
+Chaque run passe par 11 étapes. L'orchestrateur transmet le travail d'un agent au suivant dans un état partagé et le sauvegarde après chaque étape.
 
 | # | Étape | Technologie | Rôle |
 |---|---|---|---|
-| 1 | Product Owner | Ollama (qwen3, local) | Écrit les user stories, leurs priorités (MoSCoW) et leurs critères d'acceptation |
+| 1 | Product Owner | Ollama (qwen3, local) ou Claude (`PO_MOTEUR`) | Écrit les user stories, leurs priorités (MoSCoW) et leurs critères d'acceptation |
 | 2 | Architect | Claude Code | Choisit la stack, découpe l'application en modules et écrit le contrat d'API, sans écrire de code |
 | 3 | Test Agent | Claude Code | Écrit le plan de test et les tests pytest **avant** le code (TDD) ; seul agent autorisé à corriger un test |
 | 4 | Developer | Claude Code | Écrit le backend FastAPI pour faire passer les tests, sans pouvoir les modifier |
@@ -30,6 +30,8 @@ Chaque run passe par 9 étapes. L'orchestrateur transmet le travail d'un agent a
 | 7 | QA Frontend | Contrôles statiques (sans IA) | Vérifie les fichiers et la syntaxe JavaScript |
 | 8 | Dockerization | Claude Code (lecture/écriture seulement) | Écrit `Dockerfile`, `docker-compose.yml` et `.env` pour backend + frontend + base |
 | 9 | Validation Docker | Docker (sans IA) | Construit et démarre l'application, vérifie que les services répondent et ne tournent pas en root |
+| 10 | Agent E2E | Claude Code | Écrit des scénarios de bout en bout : l'API (httpx) et les pages dans un navigateur (Playwright) |
+| 11 | Tests E2E | Docker + pytest + Chromium (sans IA) | Démarre l'application et joue les scénarios comme un vrai utilisateur |
 
 **Boucles de correction** (`MAX_TENTATIVES`, 3 par défaut) :
 
@@ -37,6 +39,7 @@ Chaque run passe par 9 étapes. L'orchestrateur transmet le travail d'un agent a
 QA Backend        --échec-->  Developer       (puis Test Agent si les tests sont en cause)
 QA Frontend       --échec-->  Frontend
 Validation Docker --échec-->  Dockerization
+Tests E2E         --échec-->  Agent E2E (scénario mal écrit), Developer (API) ou Frontend (page)
 ```
 
 Une erreur de la machine (port occupé, Docker arrêté) n'est pas envoyée à un agent : le run s'arrête avec un message qui dit quoi corriger, puis on clique sur **Relancer**.
@@ -55,7 +58,7 @@ Organisation MVC :
   - `etat.py` : l'état partagé ;
   - `sauvegarde.py` : la sauvegarde SQLite après chaque étape ;
   - `orchestrateur.py` : lancement, reprise, rejeu, archivage, historique des runs.
-- **Modèle** : les agents, un dossier chacun dans `src/` : `agent_po`, `agent_architect`, `agent_test`, `agent_dev`, `agent_qa`, `agent_frontend`, `agent_dockerization`, `agent_validation_docker`.
+- **Modèle** : les agents, un dossier chacun dans `src/` : `agent_po`, `agent_architect`, `agent_test`, `agent_dev`, `agent_qa`, `agent_frontend`, `agent_dockerization`, `agent_validation_docker`, `agent_e2e`.
 - **Commun** : `src/common/schemas.py`, les formats échangés entre agents (Pydantic).
 
 ```
@@ -98,6 +101,8 @@ Puis remplir `.env`. Ce fichier contient des secrets : il n'est jamais versionn�
 | `DOCKER_BUILD_TIMEOUT`, `DOCKER_DEMARRAGE_TIMEOUT` | Délais de la Validation Docker (secondes) |
 | `CHECKPOINT_DB` | Fichier de sauvegarde des runs |
 | `ESSAIS_AGENT`, `ATTENTE_RELANCE` | Relance automatique d'un agent après une erreur passagère |
+| `PO_MOTEUR` | Moteur du Product Owner : `ollama` (local) ou `claude` |
+| `E2E_ACTIF`, `E2E_TIMEOUT` | Tests de bout en bout (1 = activés) et leur durée maximale (secondes) |
 
 Après une modification de `.env`, recréer le conteneur : `docker compose up -d --force-recreate`.
 
@@ -131,7 +136,7 @@ Raccourcis : `make docker-build`, `make docker-up`, `make docker-logs`, `make do
 L'interface a trois onglets :
 
 1. **Nouveau projet** : décrire le projet (titre, description, utilisateurs cibles, fonctionnalités clés, interface) puis **Lancer le pipeline**. Un texte vide, trop long, ou qui tente de donner des ordres à l'IA est refusé avant tout appel à l'IA.
-2. **Run en cours** : statut, chronomètre, barre des 9 étapes, une carte par agent, et le détail (user stories, architecture, plan de test, erreurs).
+2. **Run en cours** : statut, chronomètre, barre des 11 étapes, une carte par agent, et le détail (user stories, architecture, plan de test, erreurs).
 3. **Runs existants** : la liste des runs. Un clic affiche le résultat d'un run. Le bouton **Relancer** :
    - reprend un run planté ou interrompu là où il s'est arrêté ;
    - ou repart d'une étape choisie après la modification d'un agent.
@@ -147,7 +152,8 @@ L'application du dernier run est dans `output/` :
 ```
 output/
 ├── backend/        API FastAPI, tests, PLAN_DE_TEST.md, README.md
-├── frontend/       pages HTML, CSS, JavaScript
+├── frontend/       pages HTML, CSS, JavaScript, Dockerfile (nginx)
+├── e2e/            scénarios de bout en bout écrits par l'Agent E2E
 ├── docker-compose.yml
 ├── .env            mots de passe générés (non versionné)
 └── .id_run

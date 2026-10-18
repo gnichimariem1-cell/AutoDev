@@ -26,6 +26,7 @@ SORTIES_PAR_DEFAUT = {
     "valider_dockerisation": sorties.DOCKER_OK,
     "generer_tests_e2e": sorties.PLAN_E2E,
     "executer_tests_e2e": sorties.E2E_OK,
+    "corriger_scenarios_e2e": None,
 }
 
 

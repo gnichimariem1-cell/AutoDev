@@ -212,3 +212,21 @@ def test_debut_de_relance_efface_l_ancien_rapport(monkeypatch):
     assert etats["Dockerization"][0] == "ok"
     message = app.message_en_ce_moment(app._etat_pour_le_suivi(ancien))
     assert "corrige" not in message and "Docker Validation Agent" in message
+
+
+def test_relance_affichee_depuis_l_etat_sauvegarde(monkeypatch):
+    """Relance alors que la page ne suivait pas ce run (ex : apres un rechargement) :
+    l'affichage part de l'etat sauvegarde du run, pas du Product Owner."""
+    from src.agent_form import app
+    sauvegarde = {"id_run": "r1", "succes": True, "user_stories": 1, "architecture": 1,
+                  "plan_tests": SimpleNamespace(cas=[]), "sortie_dev": 1,
+                  "rapport_backend": SimpleNamespace(succes=True, tests_passes=1, tests_echoues=0),
+                  "sortie_frontend": 1, "rapport_frontend": SimpleNamespace(succes=True),
+                  "rapport_dockerisation": 1,
+                  "rapport_validation_docker": SimpleNamespace(succes=True, docker_disponible=True)}
+    monkeypatch.setattr(app, "_run_actif", SimpleNamespace(id_run="r1", termine=False, debut=0, debut_etape=0))
+    monkeypatch.setitem(app._DEPART_DU_RUN, "r1", "generation_e2e")
+    monkeypatch.setattr(app, "etat_du_run", lambda id_run: dict(sauvegarde))
+    etats = {libelle: etat for libelle, etat, _ in app.etats_des_etapes(app._etat_pour_le_suivi(None))}
+    assert etats["Product Owner"] == "ok" and etats["Validation Docker"] == "ok"
+    assert etats["Agent E2E"] == "en_cours"

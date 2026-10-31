@@ -110,6 +110,12 @@ class EchecE2E(BaseModel):
     # "application" ou "scenario" ; vide : deduite du message (voir agent_e2e.cause_de_l_echec)
     cause: str = ""
 
+class CaptureE2E(BaseModel):
+    """Preuves d'un scenario d'interface : capture de fin et video (chemins depuis la racine d'AutoDev)"""
+    id: str
+    image: str = ""
+    video: str = ""
+
 class RapportE2E(BaseModel):
     """Resultat des scenarios E2E joues sur l'application demarree"""
     docker_disponible: bool
@@ -122,4 +128,6 @@ class RapportE2E(BaseModel):
     navigateur: bool = True  # False : Chromium absent, seuls les scenarios API ont ete lances
     # Scenarios ignores (pytest.skip) : ils n'ont rien verifie, le message donne la raison
     ignores: list[EchecE2E] = []
+    # Captures et videos des scenarios d'interface (navigateur Chromium)
+    captures: list[CaptureE2E] = []
     remarque: str = ""

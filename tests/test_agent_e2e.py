@@ -339,3 +339,58 @@ def test_journal_des_runs_non_ecrit_par_les_tests():
     from src.common.logging_config import configurer_logging
     logger = configurer_logging("autodev-test-journal")
     assert not any(isinstance(h, logging.FileHandler) for h in logger.handlers)
+
+
+# --- Etape 5 : captures et videos des scenarios d'interface ---
+
+from pathlib import Path  # noqa: E402
+
+
+def test_lister_captures(tmp_path):
+    dossier = tmp_path / "e2e"
+    scenario = dossier / "captures" / "test-interface-e2e-py-test-e21-inscription-chromium"
+    scenario.mkdir(parents=True)
+    (scenario / "test-finished-1.png").write_bytes(b"png")
+    (scenario / "video.webm").write_bytes(b"webm")
+    (dossier / "captures" / "vide").mkdir()
+    captures = e2e.lister_captures(str(dossier))
+    assert [c.id for c in captures] == ["E21"]
+    assert captures[0].image.endswith("test-finished-1.png") and captures[0].video.endswith("video.webm")
+    assert e2e.options_captures("e2e")[:4] == ["--screenshot", "on", "--video", "on"]
+
+
+def test_captures_reelles_avec_chromium(tmp_path):
+    """Vrai Chromium : une capture et une video par scenario d'interface."""
+    if not e2e.navigateur_disponible():
+        pytest.skip("Chromium absent sur ce poste (present dans l'image AutoDev)")
+    dossier = tmp_path / "e2e"
+    dossier.mkdir()
+    e2e.ecrire_fichiers_autodev(str(dossier))
+    (dossier / "test_interface_e2e.py").write_text(
+        "from playwright.sync_api import Page, expect\n"
+        "def test_E01_page(page: Page):\n"
+        "    page.set_content('<h1>Bonjour GenieLab</h1>')\n"
+        "    expect(page.get_by_role('heading', name='Bonjour GenieLab')).to_be_visible()\n")
+    ancienne = dossier / "captures" / "ancien-essai"
+    ancienne.mkdir(parents=True)
+    (ancienne / "vieux.png").write_bytes(b"x")
+    rapport = e2e.lancer_scenarios([str(dossier / "test_interface_e2e.py")], str(dossier), "http://localhost:1",
+                                   front_url="http://localhost:1", captures=True)
+    assert rapport.succes is True
+    assert [c.id for c in rapport.captures] == ["E01"]  # l'ancien essai a ete efface
+    assert Path(rapport.captures[0].image).stat().st_size > 0 and Path(rapport.captures[0].video).exists()
+
+
+def test_captures_affichees_dans_le_detail(tmp_path):
+    from PIL import Image
+    from src.agent_form import app
+    from src.common.schemas import CaptureE2E
+    image = tmp_path / "fin.png"
+    Image.new("RGB", (1280, 720), "white").save(image)
+    rapport = E2E_OK.model_copy(update={"captures": [CaptureE2E(id="E21", image=str(image), video="e2e/v.webm")]})
+    resultat = {"id_run": "r1", "succes": True, "rapport_e2e": rapport}
+    detail = app._details(resultat)
+    assert "Captures et videos des scenarios d" in detail and "E21" in detail
+    assert "data:image/jpeg;base64," in detail and "e2e/v.webm" in detail
+    assert "data:image" not in app._details(dict(resultat, _en_cours="en_cours"))  # pas de miniature pendant le run
+    assert "1 capture(s) et video(s)" in app._resume_etape("Tests E2E", resultat)

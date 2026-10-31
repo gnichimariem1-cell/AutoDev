@@ -862,6 +862,8 @@ def _resume_etape(libelle, resultat) -> str:
             ignores = getattr(r, "ignores", None) or []
             if ignores:
                 texte += " · non verifie(s) : " + ", ".join(e.id for e in ignores)
+            if getattr(r, "captures", None):
+                texte += f" · {len(r.captures)} capture(s) et video(s)"
             essais = resultat.get("tentative_e2e", 1)
             if essais > 1:
                 texte += f" · corriges en {essais} essais" if r.succes else f" · apres {essais} essais"
@@ -928,6 +930,43 @@ def _chiffres(resultat) -> str:
             + "</div>")
 
 
+def _miniature(chemin) -> str:
+    """Capture reduite (JPEG en base64) pour l'afficher dans la page, ou "" si illisible."""
+    try:
+        import base64
+        import io
+        from PIL import Image
+        with Image.open(chemin) as image:
+            image = image.convert("RGB")
+            image.thumbnail((480, 480))
+            tampon = io.BytesIO()
+            image.save(tampon, "JPEG", quality=70)
+        return "data:image/jpeg;base64," + base64.b64encode(tampon.getvalue()).decode()
+    except Exception:
+        return ""
+
+
+def _bloc_captures(resultat):
+    """Captures et videos des scenarios d'interface (miniatures seulement quand le run est fini)."""
+    captures = getattr(resultat.get("rapport_e2e"), "captures", None) or []
+    if not captures:
+        return None
+    afficher = not resultat.get("_en_cours")
+    cartes = []
+    for capture in captures[:12]:
+        source = _miniature(capture.image) if afficher and capture.image else ""
+        image = (f'<img src="{source}" style="width:100%;border:1px solid #E5E7EB;border-radius:6px;margin-top:4px">'
+                 if source else "")
+        fichiers = " · ".join(_e(f) for f in (capture.image, capture.video) if f)
+        cartes.append(f'<div style="width:240px"><b>{_e(capture.id)}</b>{image}'
+                      f'<div style="font-size:11px;color:#6B7280;word-break:break-all">{fichiers}</div></div>')
+    entete = ('<div style="font-size:13px;margin-bottom:8px">Capture de fin et video (.webm, a ouvrir avec Chrome) '
+              "de chaque scenario d'interface, dans le dossier e2e/captures de l'application. "
+              "Fermer l'explorateur avant un nouveau run.</div>")
+    return ("Captures et videos des scenarios d'interface", len(captures),
+            entete + f'<div style="display:flex;flex-wrap:wrap;gap:12px">{"".join(cartes)}</div>')
+
+
 def _details(resultat) -> str:
     """Le detail, replie : user stories, plan de test, architecture, erreurs."""
     blocs = []
@@ -972,6 +1011,9 @@ def _details(resultat) -> str:
         blocs.append(("Scenarios E2E (Agent E2E)", len(plan_e2e.scenarios),
                       f"<table {style_table}><tr><th {style_th}>ID</th><th {style_th}>Type</th><th {style_th}>US</th>"
                       f"<th {style_th}>Scenario</th><th {style_th}>Resultat</th></tr>{lignes}</table>"))
+    bloc_captures = _bloc_captures(resultat)
+    if bloc_captures:
+        blocs.append(bloc_captures)
     erreurs = []
     for cle in ("rapport_backend", "rapport_frontend", "rapport_validation_docker"):
         rapport = resultat.get(cle)

@@ -68,6 +68,12 @@ lancee par un Docker qui ne voit pas ces dossiers (conteneur AutoDev, autre post
 serait vide et nginx repondrait 404. Seuls les volumes nommes (ex : db_data) sont autorises.
 Ecris aussi {dossier_frontend}/.dockerignore (au moins Dockerfile et .dockerignore) : sinon nginx servirait
 le Dockerfile comme une page du site.
+Si le backend lance une commande externe (ex : subprocess avec ["claude", ...]), installe-la dans le
+Dockerfile du backend AVANT l'instruction USER. Pour claude (Claude Code) : apt-get install nodejs npm,
+puis npm install -g @anthropic-ai/claude-code ; ENV CLAUDE_CONFIG_DIR=/home/app/.claude et
+DISABLE_AUTOUPDATER=1 ; un volume nomme monte sur /home/app/.claude garde la connexion (faite une fois
+avec docker compose exec -it app claude, puis /login) ; aucune cle API. AutoDev verifie que la
+commande existe dans l'image.
 
 N'execute aucune commande (pas de docker compose up, pas de docker build) : AutoDev
 construit et teste la configuration lui-meme juste apres.

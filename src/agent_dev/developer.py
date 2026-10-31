@@ -50,6 +50,9 @@ les champs JSON et les codes de reponse attendus. Ecris le code pour qu'ils pass
 - respecte ce contrat technique, que les tests utilisent :
 {CONTRAT_TECHNIQUE}
 - ajoute pytest et httpx dans requirements.txt
+- si l'application appelle Claude par la commande claude -p : options --tools "" et --strict-mcp-config
+  (aucun outil ni connecteur du compte), question envoyee sur l'entree standard, delai maximal, erreur 503
+  claire si la commande echoue ; jamais --allowedTools ni --dangerously-skip-permissions (verifie par AutoDev)
 
 Écris les fichiers directement sur disque."""
 

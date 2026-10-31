@@ -84,6 +84,7 @@ def test_dockerization_sans_bash_ni_secret_en_clair(mock_run):
     assert "N'execute aucune commande" in prompt
     assert "Aucun volume qui monte un dossier du projet" in prompt  # nginx en 404 dans l'Agent E2E
     assert "FROM nginx:alpine puis COPY" in prompt
+    assert "npm install -g @anthropic-ai/claude-code" in prompt  # chatbot : claude absent de l'image
     assert "jamais .local" in prompt  # ADMIN_EMAIL en .local : connexion en 500 (trouve par l'Agent E2E)
 
 

@@ -43,11 +43,38 @@ import threading
 from pathlib import Path
 
 from src.agent_validation_docker import validation_docker as vd
-from src.common.schemas import SortiePO, SortieAgentE2E, ScenarioE2E, RapportE2E, EchecE2E
+from src.common.schemas import SortiePO, SortieAgentE2E, ScenarioE2E, RapportE2E, EchecE2E, CaptureE2E
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
 NOM_PROJET = "autodev-e2e"
 E2E_TIMEOUT = int(os.environ.get("E2E_TIMEOUT", 900))
+# Capture d'ecran et video de chaque scenario d'interface (E2E_CAPTURES=0 pour les desactiver)
+DOSSIER_CAPTURES = "captures"
+
+
+def captures_actives() -> bool:
+    return os.environ.get("E2E_CAPTURES", "1").strip().lower() not in ("0", "non", "false", "no")
+
+
+def options_captures(dossier: str) -> list[str]:
+    """Options pytest-playwright : capture a la fin de chaque scenario et video, dans <dossier>/captures/."""
+    return ["--screenshot", "on", "--video", "on", "--output", str(Path(dossier) / DOSSIER_CAPTURES)]
+
+
+def lister_captures(dossier: str) -> list[CaptureE2E]:
+    """Un dossier par scenario (ex : test-interface-e2e-py-test-e21-...-chromium/) : sa capture et sa video."""
+    racine = Path(dossier) / DOSSIER_CAPTURES
+    captures = []
+    if racine.is_dir():
+        for sous_dossier in sorted(p for p in racine.iterdir() if p.is_dir()):
+            images, videos = sorted(sous_dossier.glob("*.png")), sorted(sous_dossier.glob("*.webm"))
+            if not (images or videos):
+                continue
+            numero = re.search(r"test-(e\d+)", sous_dossier.name, re.IGNORECASE)
+            captures.append(CaptureE2E(
+                id=numero.group(1).upper() if numero else sous_dossier.name,
+                image=images[-1].as_posix() if images else "", video=videos[0].as_posix() if videos else ""))
+    return captures
 FICHIER_RAPPORT = "rapport_e2e.json"
 
 
@@ -312,16 +339,19 @@ def _id_du_test(nodeid: str) -> str:
 
 
 def lancer_scenarios(fichiers: list[str], dossier: str, api_url: str, fichier_env: str = "",
-                     front_url: str = "") -> RapportE2E:
+                     front_url: str = "", captures: bool = False) -> RapportE2E:
     """Lance les scenarios avec pytest sur l'application deja demarree."""
     if not fichiers:  # sans fichier, pytest lancerait les tests du dossier courant
         raise ValueError("lancer_scenarios : aucun fichier de scenarios")
     rapport_json = Path(dossier) / FICHIER_RAPPORT
     rapport_json.unlink(missing_ok=True)
+    if captures:  # seulement les preuves de cet essai
+        shutil.rmtree(Path(dossier) / DOSSIER_CAPTURES, ignore_errors=True)
     env = dict(os.environ, E2E_API_URL=api_url, E2E_FICHIER_ENV=fichier_env, E2E_FRONT_URL=front_url or api_url)
     resultat = subprocess.run(
         [sys.executable, "-m", "pytest", *fichiers, "-q", "--rootdir", dossier,
-         "-c", str(Path(dossier) / "pytest.ini"), "--json-report", f"--json-report-file={rapport_json}"],
+         "-c", str(Path(dossier) / "pytest.ini"), "--json-report", f"--json-report-file={rapport_json}",
+         *(options_captures(dossier) if captures else [])],
         capture_output=True, text=True, timeout=E2E_TIMEOUT, env=env, encoding="utf-8", errors="replace",
     )
     if not rapport_json.exists():
@@ -355,7 +385,8 @@ def lancer_scenarios(fichiers: list[str], dossier: str, api_url: str, fichier_en
     if total == 0 and not echecs:
         erreurs.append("Aucun scenario E2E n'a ete trouve.")
     return RapportE2E(docker_disponible=True, succes=not erreurs, total=total, reussis=reussis,
-                      echecs=echecs, erreurs=erreurs, ignores=ignores)
+                      echecs=echecs, erreurs=erreurs, ignores=ignores,
+                      captures=lister_captures(dossier) if captures else [])
 
 
 # --- 3. Boucle de correction ---
@@ -468,8 +499,10 @@ def executer_tests_e2e(dossier_docker: str = "output", dossier: str | None = Non
                 return echec(f"l'application ne repond pas sur le port {port} ({probleme}).")
         # Le navigateur et les scenarios utilisent localhost, comme un vrai utilisateur
         relais = demarrer_relais(vd.HOTE_VALIDATION, [port_api, port_front])
+        avec_interface = any("test_interface" in Path(f).name for f in fichiers)
         rapport = lancer_scenarios(fichiers, dossier, f"http://localhost:{port_api}",
-                                   str(Path(dossier_docker, ".env").resolve()), f"http://localhost:{port_front}")
+                                   str(Path(dossier_docker, ".env").resolve()), f"http://localhost:{port_front}",
+                                   captures=navigateur and avec_interface and captures_actives())
         if not rapport.succes:
             logs = executer(["logs", "--tail", "40", "app"], 60).stdout
             rapport = rapport.model_copy(update={"erreurs": rapport.erreurs + [f"Logs du backend :\n{logs[-2500:]}"]})

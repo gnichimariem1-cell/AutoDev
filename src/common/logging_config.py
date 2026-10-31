@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import os
 from pathlib import Path
 
@@ -27,13 +27,16 @@ def configurer_logging(nom: str = "autodev") -> logging.Logger:
     handler_console.setFormatter(formatteur)
     logger.addHandler(handler_console)
 
-    try:
-        _DOSSIER_LOGS.mkdir(exist_ok=True)
-        handler_fichier = logging.FileHandler(_FICHIER_LOG, encoding="utf-8")
-        handler_fichier.setFormatter(formatteur)
-        logger.addHandler(handler_fichier)
-    except OSError:
-        logger.warning("Impossible d'ecrire dans %s, logs console uniquement.", _FICHIER_LOG)
+    # LOG_FICHIER vide : console seulement (les tests automatiques n'ecrivent pas dans le vrai journal)
+    fichier = Path(os.environ["LOG_FICHIER"]) if "LOG_FICHIER" in os.environ else _FICHIER_LOG
+    if str(fichier) not in ("", "."):
+        try:
+            fichier.parent.mkdir(parents=True, exist_ok=True)
+            handler_fichier = logging.FileHandler(fichier, encoding="utf-8")
+            handler_fichier.setFormatter(formatteur)
+            logger.addHandler(handler_fichier)
+        except OSError:
+            logger.warning("Impossible d'ecrire dans %s, logs console uniquement.", fichier)
 
     logger.propagate = False
     return logger

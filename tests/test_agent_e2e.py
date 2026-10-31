@@ -301,3 +301,41 @@ def test_dockerignore_du_frontend_demande(mock_run):
     mock_run.return_value = MagicMock(returncode=0, stdout="OK", stderr="")
     generer_dockerisation("output/backend", "output/frontend", "sortie_test")
     assert "output/frontend/.dockerignore" in mock_run.call_args.kwargs["input"]
+
+
+# --- Etape 4.1 : scenario ignore (pytest.skip) = non verifie ---
+
+def test_scenario_ignore_compte_comme_non_verifie(tmp_path):
+    """Cas reel (E15) : regle des 24 h ignoree le vendredi apres-midi."""
+    dossier = tmp_path / "e2e"
+    dossier.mkdir()
+    e2e.ecrire_fichiers_autodev(str(dossier))
+    fichier = dossier / "test_api_e2e.py"
+    fichier.write_text("import pytest\n"
+                       "def test_E01_regle_24h():\n    pytest.skip('Aucun creneau dans les 24 prochaines heures')\n"
+                       "def test_E02_ok():\n    assert True\n")
+    rapport = e2e.lancer_scenarios([str(fichier)], str(dossier), "http://localhost:1")
+    assert rapport.succes is True and rapport.reussis == 1 and rapport.total == 2
+    assert [i.id for i in rapport.ignores] == ["E01"]
+    assert "Aucun creneau" in rapport.ignores[0].message
+
+    from src.agent_form import app
+    from tests import sorties as s
+    resultat = {"id_run": "r1", "succes": True, "plan_e2e": s.PLAN_E2E, "rapport_e2e": rapport}
+    etats = {libelle: (etat, detail) for libelle, etat, detail in app.etats_des_etapes(resultat)}
+    assert etats["Tests E2E"] == ("attention", "1/2")
+    assert "non verifie(s) : E01" in app._resume_etape("Tests E2E", resultat)
+    assert "○ non verifie" in app._details(resultat)
+
+
+def test_consigne_limite_pytest_skip():
+    from tests import sorties as s
+    consigne = e2e.consigne_e2e(s.USER_STORIES, "demande", "b", "e2e", "f")
+    assert "`pytest.skip` interdit" in consigne
+
+
+def test_journal_des_runs_non_ecrit_par_les_tests():
+    import logging
+    from src.common.logging_config import configurer_logging
+    logger = configurer_logging("autodev-test-journal")
+    assert not any(isinstance(h, logging.FileHandler) for h in logger.handlers)

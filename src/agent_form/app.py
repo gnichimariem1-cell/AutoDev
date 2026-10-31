@@ -219,6 +219,8 @@ def _section_tests_e2e(resultat) -> str:
              f"(essai {tentative}/{MAX_TENTATIVES})\n")
     if rapport.remarque:
         texte += f"   {rapport.remarque}\n"
+    for ignore in getattr(rapport, "ignores", None) or []:
+        texte += f"   NON VERIFIE {ignore.id} (ignore) : {ignore.message}\n"
     if not rapport.succes:
         texte += "   Erreurs :\n" + "\n".join(f"     - {e[:500]}" for e in rapport.erreurs) + "\n"
     return texte
@@ -583,8 +585,8 @@ def etats_des_etapes(resultat) -> list[tuple[str, str, str]]:
                         actif_trouve = True
                     elif not valeur.succes and noeud == echec_final and valeur.erreur_environnement:
                         etat, detail = "ko", "machine"
-                    elif not valeur.succes:
-                        etat = "attention"
+                    elif not valeur.succes or getattr(valeur, "ignores", None):
+                        etat = "attention"  # en echec, ou des scenarios n'ont rien verifie
             if noeud in ("qa_backend", "qa_frontend", "validation_docker") and not valeur.succes:
                 tentative = resultat.get(
                     {"qa_backend": "tentative_backend", "qa_frontend": "tentative_frontend",
@@ -857,6 +859,9 @@ def _resume_etape(libelle, resultat) -> str:
                 return "non effectues : " + " ".join(r.erreurs)
             echecs = ", ".join(e.id for e in r.echecs)
             texte = f"{r.reussis}/{r.total} scenarios reussis" + (f" · en echec : {echecs}" if echecs else "")
+            ignores = getattr(r, "ignores", None) or []
+            if ignores:
+                texte += " · non verifie(s) : " + ", ".join(e.id for e in ignores)
             essais = resultat.get("tentative_e2e", 1)
             if essais > 1:
                 texte += f" · corriges en {essais} essais" if r.succes else f" · apres {essais} essais"
@@ -958,10 +963,12 @@ def _details(resultat) -> str:
         rapport_e2e = resultat.get("rapport_e2e")
         joues = bool(rapport_e2e and rapport_e2e.docker_disponible and rapport_e2e.total)
         en_echec = {e.id for e in rapport_e2e.echecs} if joues else set()
+        ignores = {e.id for e in getattr(rapport_e2e, "ignores", None) or []} if joues else set()
         lignes = "".join(
             f"<tr><td {style_td}>{_e(s.id)}</td><td {style_td}>{_e(s.type)}</td><td {style_td}>{_e(s.user_story)}</td>"
             f"<td {style_td}>{_e(s.description)}</td><td {style_td}>"
-            f"{('✗ echec' if s.id in en_echec else '✓ OK') if joues else '—'}</td></tr>" for s in plan_e2e.scenarios)
+            f"{('✗ echec' if s.id in en_echec else '○ non verifie' if s.id in ignores else '✓ OK') if joues else '—'}"
+            f"</td></tr>" for s in plan_e2e.scenarios)
         blocs.append(("Scenarios E2E (Agent E2E)", len(plan_e2e.scenarios),
                       f"<table {style_table}><tr><th {style_th}>ID</th><th {style_th}>Type</th><th {style_th}>US</th>"
                       f"<th {style_th}>Scenario</th><th {style_th}>Resultat</th></tr>{lignes}</table>"))

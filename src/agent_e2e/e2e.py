@@ -192,6 +192,9 @@ Regles :
   marche dans n'importe quel ordre ;
 - nom de chaque test : `test_E01_...`, `test_E02_...` (numerotation unique sur les deux fichiers) ;
 - pas de `time.sleep` de plus d'une seconde : `expect(...)` attend tout seul ;
+- `pytest.skip` interdit (une variable manquante est une erreur, pas une raison d'ignorer), sauf si une regle
+  depend vraiment de l'heure ou du jour (ex : moins de 24 h avant un rendez-vous) et qu'aucune donnee ne
+  permet de la tester maintenant : donne alors la raison exacte. Un scenario ignore est affiche « non verifie » ;
 - httpx : un client deja utilise ne peut pas etre rouvert avec `with` (RuntimeError) ; une fonction
   utilitaire qui connecte un compte renvoie un client deja ouvert, utilise-le sans `with` puis ferme-le
   avec `.close()` ;
@@ -337,13 +340,22 @@ def lancer_scenarios(fichiers: list[str], dossier: str, api_url: str, fichier_en
         if collecte["outcome"] == "failed":
             echecs.append(EchecE2E(id="collecte", type=_type_du_test(collecte["nodeid"]), test=collecte["nodeid"],
                                    message=str(collecte.get("longrepr", ""))[-1500:]))
+    ignores = []
+    for test in rapport.get("tests", []):
+        if test["outcome"] == "skipped":
+            etape = next((test.get(p) for p in ("setup", "call")
+                          if test.get(p, {}).get("outcome") == "skipped"), {}) or {}
+            texte = str(etape.get("longrepr", ""))
+            raison = re.search(r"Skipped: (.*?)['\"]?\)?\s*$", texte, re.DOTALL)
+            ignores.append(EchecE2E(id=_id_du_test(test["nodeid"]), type=_type_du_test(test["nodeid"]),
+                                    test=test["nodeid"], message=(raison.group(1) if raison else texte)[-300:]))
     total = rapport["summary"].get("total", 0)
     reussis = rapport["summary"].get("passed", 0)
     erreurs = [f"[E2E {e.type}] {e.id} ({e.test}) : {e.message}" for e in echecs]
     if total == 0 and not echecs:
         erreurs.append("Aucun scenario E2E n'a ete trouve.")
     return RapportE2E(docker_disponible=True, succes=not erreurs, total=total, reussis=reussis,
-                      echecs=echecs, erreurs=erreurs)
+                      echecs=echecs, erreurs=erreurs, ignores=ignores)
 
 
 # --- 3. Boucle de correction ---

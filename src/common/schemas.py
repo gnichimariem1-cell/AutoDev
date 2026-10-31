@@ -120,4 +120,6 @@ class RapportE2E(BaseModel):
     erreurs: list[str] = []
     erreur_environnement: bool = False
     navigateur: bool = True  # False : Chromium absent, seuls les scenarios API ont ete lances
+    # Scenarios ignores (pytest.skip) : ils n'ont rien verifie, le message donne la raison
+    ignores: list[EchecE2E] = []
     remarque: str = ""

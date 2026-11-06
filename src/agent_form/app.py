@@ -930,7 +930,7 @@ def _chiffres(resultat) -> str:
             + "</div>")
 
 
-def _miniature(chemin) -> str:
+def _miniature(chemin, taille: int = 480) -> str:
     """Capture reduite (JPEG en base64) pour l'afficher dans la page, ou "" si illisible."""
     try:
         import base64
@@ -938,7 +938,7 @@ def _miniature(chemin) -> str:
         from PIL import Image
         with Image.open(chemin) as image:
             image = image.convert("RGB")
-            image.thumbnail((480, 480))
+            image.thumbnail((taille, taille))
             tampon = io.BytesIO()
             image.save(tampon, "JPEG", quality=70)
         return "data:image/jpeg;base64," + base64.b64encode(tampon.getvalue()).decode()
@@ -953,15 +953,25 @@ def _bloc_captures(resultat):
         return None
     afficher = not resultat.get("_en_cours")
     cartes = []
-    for capture in captures[:12]:
+    for capture in captures[:20]:
         source = _miniature(capture.image) if afficher and capture.image else ""
         image = (f'<img src="{source}" style="width:100%;border:1px solid #E5E7EB;border-radius:6px;margin-top:4px">'
                  if source else "")
+        etapes = ""
+        for chemin in getattr(capture, "etapes", [])[:8]:
+            nom = Path(chemin).stem.split("-", 1)[-1].replace("_", " ")
+            mini = _miniature(chemin, 240) if afficher else ""
+            etapes += (f'<div style="width:112px;font-size:11px;color:#374151">'
+                       + (f'<img src="{mini}" style="width:100%;border:1px solid #E5E7EB;border-radius:4px">'
+                          if mini else "") + f"{_e(nom)}</div>")
+        if etapes:
+            etapes = f'<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">{etapes}</div>'
         fichiers = " · ".join(_e(f) for f in (capture.image, capture.video) if f)
-        cartes.append(f'<div style="width:240px"><b>{_e(capture.id)}</b>{image}'
+        cartes.append(f'<div style="width:240px"><b>{_e(capture.id)}</b>{image}{etapes}'
                       f'<div style="font-size:11px;color:#6B7280;word-break:break-all">{fichiers}</div></div>')
-    entete = ('<div style="font-size:13px;margin-bottom:8px">Capture de fin et video (.webm, a ouvrir avec Chrome) '
-              "de chaque scenario d'interface, dans le dossier e2e/captures de l'application. "
+    entete = ('<div style="font-size:13px;margin-bottom:8px">Capture de fin, captures des etapes cles et video '
+              "(.webm, a ouvrir avec Chrome) de chaque scenario d'interface, dans les dossiers e2e/captures "
+              "et e2e/etapes de l'application. "
               "Fermer l'explorateur avant un nouveau run.</div>")
     return ("Captures et videos des scenarios d'interface", len(captures),
             entete + f'<div style="display:flex;flex-wrap:wrap;gap:12px">{"".join(cartes)}</div>')

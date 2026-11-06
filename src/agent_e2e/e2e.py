@@ -51,6 +51,8 @@ NOM_PROJET = "autodev-e2e"
 E2E_TIMEOUT = int(os.environ.get("E2E_TIMEOUT", 900))
 # Capture d'ecran et video de chaque scenario d'interface (E2E_CAPTURES=0 pour les desactiver)
 DOSSIER_CAPTURES = "captures"
+# Captures aux etapes cles : <dossier e2e>/etapes/<id du scenario>/01-nom.png
+DOSSIER_ETAPES = "etapes"
 
 
 def captures_actives() -> bool:
@@ -75,6 +77,17 @@ def lister_captures(dossier: str) -> list[CaptureE2E]:
             captures.append(CaptureE2E(
                 id=numero.group(1).upper() if numero else sous_dossier.name,
                 image=images[-1].as_posix() if images else "", video=videos[0].as_posix() if videos else ""))
+    racine_etapes = Path(dossier) / DOSSIER_ETAPES
+    if racine_etapes.is_dir():
+        par_id = {c.id: c for c in captures}
+        for sous_dossier in sorted(p for p in racine_etapes.iterdir() if p.is_dir()):
+            etapes = [p.as_posix() for p in sorted(sous_dossier.glob("*.png"))]
+            if not etapes:
+                continue
+            if sous_dossier.name not in par_id:
+                par_id[sous_dossier.name] = CaptureE2E(id=sous_dossier.name)
+                captures.append(par_id[sous_dossier.name])
+            par_id[sous_dossier.name].etapes = etapes
     return captures
 FICHIER_RAPPORT = "rapport_e2e.json"
 
@@ -128,6 +141,26 @@ def variables_app():
                 nom, valeur = ligne.split("=", 1)
                 variables[nom.strip()] = valeur.strip().strip('"').strip("'")
     return variables
+
+
+@pytest.fixture
+def etape(request):
+    """Capture a une etape cle du scenario : etape("formulaire_rempli"). Rien si les captures sont desactivees."""
+    import re
+    dossier = os.environ.get("E2E_DOSSIER_ETAPES", "")
+    trouve = re.search(r"test_(E\\d+)", request.node.name)
+    numero = [0]
+
+    def capturer(nom):
+        if not dossier:
+            return
+        page = request.getfixturevalue("page")
+        numero[0] += 1
+        propre = re.sub(r"[^a-zA-Z0-9_-]+", "_", nom).strip("_")[:40] or "etape"
+        cible = Path(dossier) / (trouve.group(1) if trouve else request.node.name)
+        cible.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(cible / f"{numero[0]:02d}-{propre}.png"))
+    return capturer
 
 
 @pytest.fixture(scope="session")
@@ -201,13 +234,15 @@ Code de l'application, a LIRE d'abord :
 - frontend dans {dossier_frontend}/ : pages HTML et JavaScript (champs, boutons, textes affiches, pages).
 Le fichier {dossier}/conftest.py est deja ecrit : lis-le. Il fournit les fixtures `api_url`, `front_url`,
 `nouvel_email()` (adresse unique), `variables_app` (variables du .env de l'application, par exemple un
-mot de passe administrateur) et `page` (navigateur Chromium, fourni par pytest-playwright).
+mot de passe administrateur), `etape("nom")` (capture d'ecran a une etape cle d'un scenario d'interface)
+et `page` (navigateur Chromium, fourni par pytest-playwright).
 
 Ecris EXACTEMENT deux fichiers, dans {dossier}/ uniquement :
 1. test_api_e2e.py : parcours complets sur l'API avec httpx (`httpx.Client(base_url=api_url)` garde les
    cookies de connexion). Au moins un scenario par user story, et un scenario pour chaque regle metier de
    la demande (l'action interdite doit etre refusee, avec le code de reponse attendu).
-2. test_interface_e2e.py : 3 a 6 parcours principaux dans le navigateur avec Playwright
+2. test_interface_e2e.py : un parcours par page principale de l'application (entre 6 et 12) dans le
+   navigateur avec Playwright
    (`from playwright.sync_api import Page, expect`, fixture `page`) : ouvrir `front_url`, remplir les
    formulaires, cliquer, puis verifier avec `expect(...)` ce qui s'affiche (inscription et connexion,
    l'action principale de l'application, un message d'erreur montre a l'utilisateur). Utilise les
@@ -215,7 +250,7 @@ Ecris EXACTEMENT deux fichiers, dans {dossier}/ uniquement :
    `get_by_text`) plutot que des selecteurs CSS fragiles.
 
 Regles :
-- entre 8 et 25 scenarios en tout ;
+- entre 10 et 30 scenarios en tout ;
 - chaque test cree ses propres donnees (comptes avec `nouvel_email()`), ne depend d'aucun autre test et
   marche dans n'importe quel ordre ;
 - nom de chaque test : `test_E01_...`, `test_E02_...` (numerotation unique sur les deux fichiers) ;
@@ -341,7 +376,9 @@ def lancer_scenarios(fichiers: list[str], dossier: str, api_url: str, fichier_en
     rapport_json.unlink(missing_ok=True)
     if captures:  # seulement les preuves de cet essai
         shutil.rmtree(Path(dossier) / DOSSIER_CAPTURES, ignore_errors=True)
-    env = dict(os.environ, E2E_API_URL=api_url, E2E_FICHIER_ENV=fichier_env, E2E_FRONT_URL=front_url or api_url)
+        shutil.rmtree(Path(dossier) / DOSSIER_ETAPES, ignore_errors=True)
+    env = dict(os.environ, E2E_API_URL=api_url, E2E_FICHIER_ENV=fichier_env, E2E_FRONT_URL=front_url or api_url,
+               E2E_DOSSIER_ETAPES=str((Path(dossier) / DOSSIER_ETAPES).resolve()) if captures else "")
     resultat = subprocess.run(
         [sys.executable, "-m", "pytest", *fichiers, "-q", "--rootdir", dossier,
          "-c", str(Path(dossier) / "pytest.ini"), "--json-report", f"--json-report-file={rapport_json}",

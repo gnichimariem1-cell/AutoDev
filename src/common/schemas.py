@@ -115,6 +115,7 @@ class CaptureE2E(BaseModel):
     id: str
     image: str = ""
     video: str = ""
+    etapes: list[str] = []  # captures aux etapes cles (fixture etape("nom")), dans l'ordre
 
 class RapportE2E(BaseModel):
     """Resultat des scenarios E2E joues sur l'application demarree"""

@@ -13,4 +13,14 @@
 - **Chaque regle metier de la demande a au moins un scenario qui verifie le refus (ex : chevauchement, role insuffisant).**
   Pourquoi : c'est là que les applications générées se trompent le plus.
 
+- **Chaque page principale de l'application (connexion, tableau de bord, chaque liste ou formulaire, assistant...) a au moins un scenario d'interface.**
+  Pourquoi : seuls les scénarios d'interface donnent une capture et une vidéo ; avec 3 à 6 parcours,
+  la plupart des pages n'étaient jamais vues.
+  Origine : GenieLab Hub, seulement 5 captures pour toute l'application.
+
+- **Dans chaque scenario d'interface, appelle etape("nom_court") apres chaque action importante : page ouverte, formulaire rempli, apres le clic, resultat affiche (2 a 5 etapes par scenario). Ajoute la fixture etape aux parametres du test : def test_E21_connexion(page: Page, front_url, etape).**
+  Pourquoi : on suit le scénario image par image, sans regarder la vidéo ; en cas d'échec, on voit
+  la dernière étape réussie.
+  Origine : GenieLab Hub, une seule capture (la fin) par scénario.
+
 - **N'affiche jamais un mot de passe dans un message d'assertion.**

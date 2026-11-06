@@ -1,8 +1,9 @@
-﻿import re
+import re
 import subprocess
 import os
 import shutil
 from src.common.schemas import SortiePO, SortieArchitecte
+from src.common.regles import bloc_regles
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
 
@@ -31,7 +32,7 @@ def generer_architecture(user_stories: SortiePO) -> SortieArchitecte:
     transmis au Developer Agent (voir agent_orchestrateur/orchestrateur.py)
     qui le suit comme contrainte de generation.
     """
-    prompt = f"{PROMPT_SYSTEME}\n\nUser Stories :\n{user_stories.model_dump_json(indent=2)}"
+    prompt = f"{PROMPT_SYSTEME}{bloc_regles('architect')}\nUser Stories :\n{user_stories.model_dump_json(indent=2)}"
 
     resultat = subprocess.run(
         [CLAUDE_BIN, "-p"],

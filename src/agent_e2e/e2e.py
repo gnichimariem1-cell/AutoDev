@@ -44,6 +44,7 @@ from pathlib import Path
 
 from src.agent_validation_docker import validation_docker as vd
 from src.common.schemas import SortiePO, SortieAgentE2E, ScenarioE2E, RapportE2E, EchecE2E, CaptureE2E
+from src.common.regles import bloc_regles
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
 NOM_PROJET = "autodev-e2e"
@@ -219,18 +220,11 @@ Regles :
   marche dans n'importe quel ordre ;
 - nom de chaque test : `test_E01_...`, `test_E02_...` (numerotation unique sur les deux fichiers) ;
 - pas de `time.sleep` de plus d'une seconde : `expect(...)` attend tout seul ;
-- `pytest.skip` interdit (une variable manquante est une erreur, pas une raison d'ignorer), sauf si une regle
-  depend vraiment de l'heure ou du jour (ex : moins de 24 h avant un rendez-vous) et qu'aucune donnee ne
-  permet de la tester maintenant : donne alors la raison exacte. Un scenario ignore est affiche « non verifie » ;
-- httpx : un client deja utilise ne peut pas etre rouvert avec `with` (RuntimeError) ; une fonction
-  utilitaire qui connecte un compte renvoie un client deja ouvert, utilise-le sans `with` puis ferme-le
-  avec `.close()` ;
 - chaque assertion a un message clair en francais : ce qui etait attendu et ce qui a ete obtenu
   (par exemple le code HTTP et le debut de la reponse) ;
 - ne modifie ni conftest.py ni pytest.ini, n'ecris dans aucun autre dossier, ne modifie pas l'application ;
-- n'affiche jamais un mot de passe dans un message ;
 - n'execute aucune commande : AutoDev lance les tests lui-meme.
-
+{bloc_regles('agent_e2e')}
 Quand les fichiers sont ecrits, reponds UNIQUEMENT avec ce JSON, sans texte autour :
 {{"scenarios": [{{"id": "E01", "type": "api", "user_story": "US1", "description": "..."}}]}}
 (type : "api" ou "interface")"""
@@ -443,7 +437,8 @@ Regles :
 - ne supprime aucun scenario et n'en affaiblis aucun (pas de `pytest.skip`, pas d'assertion retiree) ;
 - httpx : un client deja utilise ne peut pas etre rouvert avec `with` ;
 - ne modifie ni conftest.py, ni pytest.ini, ni les autres scenarios, ni l'application ;
-- n'execute aucune commande : AutoDev relance les scenarios lui-meme."""
+- n'execute aucune commande : AutoDev relance les scenarios lui-meme.
+{bloc_regles('agent_e2e')}"""
     resultat = subprocess.run(
         [CLAUDE_BIN, "-p", "--allowedTools", "Read,Write,Edit,Glob,Grep"],
         input=consigne, capture_output=True, text=True, timeout=int(os.environ.get("CLAUDE_TIMEOUT", 1200)),

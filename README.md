@@ -66,6 +66,7 @@ AutoDev/
 ├── src/                  code d'AutoDev (Vue, Contrôleur, agents)
 ├── tests/                tests automatiques d'AutoDev (IA simulée)
 ├── docs/                 documentation du pipeline
+├── regles/               regles de chaque agent, un fichier par agent (voir regles/README.md)
 ├── output/               application générée par le dernier run (non versionné)
 ├── archives/             applications des runs précédents (non versionné)
 ├── checkpoints/          sauvegardes des runs, pipeline.sqlite (non versionné)

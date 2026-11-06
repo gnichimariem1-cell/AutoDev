@@ -4,6 +4,7 @@ import subprocess
 import shutil
 from pathlib import Path
 from src.common.schemas import SortieDockerization
+from src.common.regles import bloc_regles
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
 # Fichier ecrit par l'orchestrateur dans output/ : l'ID du run.
@@ -59,21 +60,7 @@ passe PostgreSQL, compte administrateur, cle JWT...) : utilise des variables ${{
 Ecris leurs valeurs dans {dossier_sortie}/.env (valeurs aleatoires, au moins 16 caracteres
 pour les mots de passe), et les memes noms sans valeur dans {dossier_sortie}/.env.example.
 Docker Compose lit {dossier_sortie}/.env automatiquement.
-Adresses e-mail par defaut (compte administrateur, comptes de demonstration) : un domaine normal
-(ex : cabinet-medical.fr), jamais .local, .localhost, .test, .invalid ni .example : la validation
-des e-mails (EmailStr) les refuse et l'application planterait.
-Aucun volume qui monte un dossier du projet (ex : ./frontend:/usr/share/nginx/html ou ./backend:/app) :
-le code et les pages sont COPIES dans les images (COPY dans un Dockerfile). L'application est aussi
-lancee par un Docker qui ne voit pas ces dossiers (conteneur AutoDev, autre poste) : un dossier monte y
-serait vide et nginx repondrait 404. Seuls les volumes nommes (ex : db_data) sont autorises.
-Ecris aussi {dossier_frontend}/.dockerignore (au moins Dockerfile et .dockerignore) : sinon nginx servirait
-le Dockerfile comme une page du site.
-Si le backend lance une commande externe (ex : subprocess avec ["claude", ...]), installe-la dans le
-Dockerfile du backend AVANT l'instruction USER. Pour claude (Claude Code) : apt-get install nodejs npm,
-puis npm install -g @anthropic-ai/claude-code ; ENV CLAUDE_CONFIG_DIR=/home/app/.claude et
-DISABLE_AUTOUPDATER=1 ; un volume nomme monte sur /home/app/.claude garde la connexion (faite une fois
-avec docker compose exec -it app claude, puis /login) ; aucune cle API. AutoDev verifie que la
-commande existe dans l'image.
+{bloc_regles('dockerization', dossier_frontend=dossier_frontend)}
 
 N'execute aucune commande (pas de docker compose up, pas de docker build) : AutoDev
 construit et teste la configuration lui-meme juste apres.
@@ -110,6 +97,7 @@ HTTP des services "app" et "frontend"). Garde les noms de services "app", "front
 Ne modifie que les fichiers Docker de {dossier_sortie}/, pas le code du backend ni du frontend.
 Garde la premiere ligne « name: ... » du docker-compose.yml, ne mets aucun secret en clair
 (variables ${{...}} lues dans {dossier_sortie}/.env) et n'execute aucune commande.
+{bloc_regles('dockerization', dossier_frontend=dossier_sortie + '/frontend')}
 
 Erreurs de validation :
 {json.dumps(rapport_erreurs, ensure_ascii=False, indent=2)}"""

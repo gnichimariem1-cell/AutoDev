@@ -1,0 +1,16 @@
+# Règles de l'Agent E2E
+
+- **`pytest.skip` interdit (une variable manquante est une erreur, pas une raison d'ignorer), sauf si une regle depend vraiment de l'heure ou du jour (ex : moins de 24 h avant un rendez-vous) et qu'aucune donnee ne permet de la tester maintenant : donne alors la raison exacte.**
+  Pourquoi : un scénario ignoré n'a rien vérifié ; il est affiché « non vérifié ».
+  Origine : Cabinet médical, E15 (règle des 24 h) s'ignorait le vendredi après-midi.
+
+- **httpx : un client deja utilise ne peut pas etre rouvert avec `with` (RuntimeError) ; une fonction utilitaire qui connecte un compte renvoie un client deja ouvert, utilise-le sans `with` puis ferme-le avec `.close()`.**
+  Origine : Cabinet médical, le scénario E23 plantait sur cette erreur.
+
+- **Utilise les libelles, roles et textes reellement presents dans les pages (get_by_label, get_by_role, get_by_text), apres avoir lu les fichiers HTML du frontend.**
+  Pourquoi : un scénario qui devine un libellé échoue alors que l'application est juste.
+
+- **Chaque regle metier de la demande a au moins un scenario qui verifie le refus (ex : chevauchement, role insuffisant).**
+  Pourquoi : c'est là que les applications générées se trompent le plus.
+
+- **N'affiche jamais un mot de passe dans un message d'assertion.**

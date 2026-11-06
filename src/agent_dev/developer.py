@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 from src.common.schemas import SortiePO, SortieDev, SortieArchitecte
 from src.agent_test.testeur import CONTRAT_TECHNIQUE
+from src.common.regles import bloc_regles
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
 
@@ -33,7 +34,6 @@ un autre port (ex : http://localhost:8080), puisse appeler l'API.
 
 Inclus également :
 - un fichier .env.example listant les variables necessaires (DATABASE_URL, SECRET_KEY, etc.)
-- Adresses e-mail par defaut (compte administrateur, comptes de demonstration) : un domaine normal (ex : cabinet-medical.fr), jamais .local, .localhost, .test, .invalid ni .example : la validation des e-mails (EmailStr) les refuse et l'application planterait.
 - un README.md qui documente comment lancer l'API : variables d'environnement, creation
   ou migration du schema de la base, initialisation eventuelle (ex : compte admin) et
   commande de demarrage (uvicorn sur le port 8000)
@@ -50,10 +50,7 @@ les champs JSON et les codes de reponse attendus. Ecris le code pour qu'ils pass
 - respecte ce contrat technique, que les tests utilisent :
 {CONTRAT_TECHNIQUE}
 - ajoute pytest et httpx dans requirements.txt
-- si l'application appelle Claude par la commande claude -p : options --tools "" et --strict-mcp-config
-  (aucun outil ni connecteur du compte), question envoyee sur l'entree standard, delai maximal, erreur 503
-  claire si la commande echoue ; jamais --allowedTools ni --dangerously-skip-permissions (verifie par AutoDev)
-
+{bloc_regles('developer')}
 Écris les fichiers directement sur disque."""
 
     resultat = subprocess.run(
@@ -76,7 +73,8 @@ def appliquer_corrections(rapport_erreurs: list[str], dossier_sortie: str = "out
 {json.dumps(rapport_erreurs, ensure_ascii=False, indent=2)}
 
 Ne modifie PAS et ne supprime PAS les fichiers de tests ({dossier_sortie}/tests/) :
-corrige uniquement le code de l'application pour que les tests existants passent."""
+corrige uniquement le code de l'application pour que les tests existants passent.
+{bloc_regles('developer')}"""
     resultat = subprocess.run(
         [CLAUDE_BIN, "-p", "--allowedTools", "Write,Edit,Bash"],
         input=prompt,

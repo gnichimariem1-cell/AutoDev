@@ -28,9 +28,9 @@ from src.agent_dockerization.dockerization import generer_dockerisation, appliqu
 from src.agent_validation_docker.validation_docker import valider_dockerisation
 from src.agent_e2e.e2e import (
     generer_tests_e2e, executer_tests_e2e, dossier_e2e, lire_tests_e2e, restaurer_tests_e2e,
-    cause_de_l_echec, consignes_de_correction, corriger_scenarios_e2e,
+    cause_de_l_echec, consignes_de_correction, corriger_scenarios_e2e, destinataire, message_court,
 )
-from src.common.schemas import SortieAgentE2E, RapportE2E, EchecE2E
+from src.common.schemas import SortieAgentE2E, RapportE2E, EchecE2E, EssaiE2E
 from src.agent_orchestrateur.etat import EtatPipeline, MAX_TENTATIVES
 
 logger = configurer_logging()
@@ -264,6 +264,17 @@ def _controles_apres_correction(etat: EtatPipeline, maj: dict) -> list[EchecE2E]
     return echecs
 
 
+def _avec_essai(rapport: RapportE2E, etat: EtatPipeline, tentative: int) -> RapportE2E:
+    """Ajoute cet essai a l'historique du run et ecrit chaque echec dans le journal."""
+    echecs = [EchecE2E(id=e.id, type=e.type, test=e.test, message=message_court(e.message), cause=destinataire(e))
+              for e in rapport.echecs]
+    for echec in echecs:
+        logger.warning("[E2E]   %s (%s -> %s) : %s", echec.id, echec.type, echec.cause, echec.message)
+    precedents = list(getattr(etat.get("rapport_e2e"), "essais", None) or []) if tentative > 1 else []
+    essai = EssaiE2E(numero=tentative, reussis=rapport.reussis, total=rapport.total, echecs=echecs)
+    return rapport.model_copy(update={"essais": precedents + [essai]})
+
+
 @_proteger("e2e")
 def noeud_e2e(etat: EtatPipeline) -> dict:
     """AutoDev demarre l'application et joue les scenarios E2E (sans IA)."""
@@ -284,10 +295,10 @@ def noeud_e2e(etat: EtatPipeline) -> dict:
         if echecs:
             precedent = etat["rapport_e2e"]
             logger.warning("[E2E] controles en echec apres la correction : %s", [e.id for e in echecs])
-            maj["rapport_e2e"] = RapportE2E(
+            maj["rapport_e2e"] = _avec_essai(RapportE2E(
                 docker_disponible=True, succes=False, total=precedent.total, reussis=precedent.reussis,
                 echecs=echecs, erreurs=[f"{e.id} : {e.message}" for e in echecs],
-                navigateur=precedent.navigateur, remarque=precedent.remarque)
+                navigateur=precedent.navigateur, remarque=precedent.remarque), etat, tentative)
             return maj
     logger.info("[E2E] Tests E2E : tentative %d/%d (demarrage de l'application et des scenarios)",
                 tentative, MAX_TENTATIVES)
@@ -308,6 +319,8 @@ def noeud_e2e(etat: EtatPipeline) -> dict:
     if rapport.erreur_environnement:
         logger.warning("[E2E] Tests E2E : probleme sur la machine — %s", " ".join(rapport.erreurs))
         maj["etape"] = "e2e"
+    elif rapport.docker_disponible:
+        rapport = _avec_essai(rapport, etat, tentative)
     maj["rapport_e2e"] = rapport
     return maj
 

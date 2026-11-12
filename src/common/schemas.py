@@ -117,6 +117,14 @@ class CaptureE2E(BaseModel):
     video: str = ""
     etapes: list[str] = []  # captures aux etapes cles (fixture etape("nom")), dans l'ordre
 
+class EssaiE2E(BaseModel):
+    """Un essai des Tests E2E : resultat et scenarios en echec (message court, qui corrige)"""
+    numero: int
+    reussis: int = 0
+    total: int = 0
+    echecs: list[EchecE2E] = []  # message raccourci ; cause = "Agent E2E", "Developer" ou "Frontend"
+
+
 class RapportE2E(BaseModel):
     """Resultat des scenarios E2E joues sur l'application demarree"""
     docker_disponible: bool
@@ -132,3 +140,5 @@ class RapportE2E(BaseModel):
     # Captures et videos des scenarios d'interface (navigateur Chromium)
     captures: list[CaptureE2E] = []
     remarque: str = ""
+    # Tous les essais de ce run, dans l'ordre (le dernier est ce rapport)
+    essais: list[EssaiE2E] = []

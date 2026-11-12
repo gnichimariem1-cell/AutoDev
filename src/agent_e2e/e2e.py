@@ -444,6 +444,20 @@ def cause_de_l_echec(echec: EchecE2E) -> str:
     return "application" if any(nom in echec.message for nom in ERREURS_DE_L_APPLICATION) else "scenario"
 
 
+def destinataire(echec: EchecE2E) -> str:
+    """Qui corrige ce scenario : l'Agent E2E (scenario mal ecrit), le Developer (API) ou le Frontend (pages)."""
+    if cause_de_l_echec(echec) == "scenario":
+        return "Agent E2E"
+    return "Frontend" if echec.type == "interface" else "Developer"
+
+
+def message_court(message: str, limite: int = 300) -> str:
+    """L'essentiel d'un message pytest : ses lignes « E  ... » (l'erreur), sinon la fin du message."""
+    lignes = [ligne[1:].strip() for ligne in message.splitlines() if ligne.startswith("E ")]
+    texte = " | ".join(l for l in lignes if l) if lignes else " ".join(message.split())[-limite:]
+    return texte[:limite]
+
+
 def consignes_de_correction(echecs: list[EchecE2E], type_echec: str) -> list[str]:
     """Erreurs transmises au Developer ("api") ou au Frontend Agent ("interface")."""
     if type_echec == "interface":

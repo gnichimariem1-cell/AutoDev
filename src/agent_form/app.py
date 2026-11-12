@@ -867,6 +867,9 @@ def _resume_etape(libelle, resultat) -> str:
             essais = resultat.get("tentative_e2e", 1)
             if essais > 1:
                 texte += f" · corriges en {essais} essais" if r.succes else f" · apres {essais} essais"
+            historique = getattr(r, "essais", None) or []
+            if len(historique) > 1:
+                texte += f" · premier essai : {historique[0].reussis}/{historique[0].total}"
             return texte + ("" if r.navigateur else " · API seulement (navigateur absent)")
     except (KeyError, AttributeError, TypeError):
         return ""
@@ -1021,6 +1024,21 @@ def _details(resultat) -> str:
         blocs.append(("Scenarios E2E (Agent E2E)", len(plan_e2e.scenarios),
                       f"<table {style_table}><tr><th {style_th}>ID</th><th {style_th}>Type</th><th {style_th}>US</th>"
                       f"<th {style_th}>Scenario</th><th {style_th}>Resultat</th></tr>{lignes}</table>"))
+    historique = getattr(resultat.get("rapport_e2e"), "essais", None) or []
+    if len(historique) > 1 or any(essai.echecs for essai in historique):
+        lignes = ""
+        for essai in historique:
+            if not essai.echecs:
+                lignes += (f"<tr><td {style_td}>{essai.numero}</td><td {style_td}>{essai.reussis}/{essai.total}</td>"
+                           f"<td {style_td}>—</td><td {style_td}>—</td><td {style_td}>✓ tout passe</td></tr>")
+            for echec in essai.echecs:
+                lignes += (f"<tr><td {style_td}>{essai.numero}</td><td {style_td}>{essai.reussis}/{essai.total}</td>"
+                           f"<td {style_td}>{_e(echec.id)} ({_e(echec.type)})</td><td {style_td}>{_e(echec.cause)}</td>"
+                           f"<td {style_td}><code style=\"white-space:pre-wrap\">{_e(echec.message)}</code></td></tr>")
+        blocs.append(("Essais des Tests E2E (erreurs et corrections)", len(historique),
+                      f"<table {style_table}><tr><th {style_th}>Essai</th><th {style_th}>Reussis</th>"
+                      f"<th {style_th}>Scenario</th><th {style_th}>Corrige par</th><th {style_th}>Erreur</th>"
+                      f"</tr>{lignes}</table>"))
     bloc_captures = _bloc_captures(resultat)
     if bloc_captures:
         blocs.append(bloc_captures)

@@ -10,6 +10,8 @@ os.environ.setdefault("CHECKPOINT_DB", ":memory:")
 os.environ.setdefault("ATTENTE_RELANCE", "0")
 # Les tests n'ecrivent pas dans logs/pipeline.log (le journal des vrais runs)
 os.environ.setdefault("LOG_FICHIER", "")
+# La file d'attente des tests reste en memoire (pas de checkpoints/file_attente.json)
+os.environ.setdefault("FILE_ATTENTE_JSON", "")
 from tests import sorties  # noqa: E402
 
 SORTIES_PAR_DEFAUT = {

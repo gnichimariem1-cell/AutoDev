@@ -11,7 +11,7 @@ from typing import TypedDict
 from src.common.schemas import (
     BesoinUtilisateur, SortiePO, SortieArchitecte, SortieDev, RapportQA,
     SortieFrontend, RapportQAFrontend, SortieDockerization, RapportValidationDocker,
-    SortieTestAgent,
+    SortieTestAgent, SortieAgentE2E, RapportE2E,
 )
 
 MAX_TENTATIVES = int(os.environ.get("MAX_TENTATIVES", 3))
@@ -39,11 +39,16 @@ class EtatPipeline(TypedDict, total=False):
     rapport_frontend: RapportQAFrontend
     rapport_dockerisation: SortieDockerization
     rapport_validation_docker: RapportValidationDocker
+    # Tests de bout en bout : scenarios de l'Agent E2E, leur version de reference (protegee), resultat
+    plan_e2e: SortieAgentE2E
+    e2e_originaux: dict[str, str]
+    rapport_e2e: RapportE2E
 
     # Compteurs des boucles de correction
     tentative_backend: int
     tentative_frontend: int
     tentative_docker: int
+    tentative_e2e: int
 
     # Resultat : succes, et en cas d'echec l'etape ou le pipeline s'est arrete :
     # - echec de QA apres MAX_TENTATIVES : "backend", "frontend" ou "docker"

@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 from src.common.schemas import BesoinUtilisateur, SortiePO, SortieFrontend, SortieArchitecte
 from src.agent_test.testeur import bloc_besoin
+from src.common.regles import bloc_regles
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
 
@@ -62,7 +63,7 @@ def generer_frontend(
         user_stories_json=user_stories.model_dump_json(indent=2),
         bloc_besoin=bloc_besoin(besoin, "Chaque comportement decrit dans ce besoin doit etre accessible depuis l'interface."),
         bloc_conception=_bloc_conception(architecture, organisation_interface),
-    )
+    ) + bloc_regles("frontend")
 
     resultat = subprocess.run(
         [CLAUDE_BIN, "-p", "--allowedTools", "Read,Write,Edit,Bash"],
@@ -85,7 +86,8 @@ def appliquer_corrections_frontend(
     rapport_erreurs: list[str], dossier_sortie: str = "output/frontend"
 ) -> SortieFrontend:
     prompt = f"""Corrige le frontend dans {dossier_sortie}. Voici les erreurs QA à résoudre :
-{json.dumps(rapport_erreurs, ensure_ascii=False, indent=2)}"""
+{json.dumps(rapport_erreurs, ensure_ascii=False, indent=2)}
+{bloc_regles('frontend')}"""
 
     resultat = subprocess.run(
         [CLAUDE_BIN, "-p", "--allowedTools", "Read,Write,Edit,Bash"],

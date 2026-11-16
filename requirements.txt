@@ -7,6 +7,9 @@ psycopg2-binary
 pytest
 pytest-cov
 pytest-json-report
+httpx
+playwright
+pytest-playwright
 python-dotenv
 langgraph>=1.2,<2
 langgraph-checkpoint-sqlite>=3.0,<4

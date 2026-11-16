@@ -8,6 +8,10 @@ import pytest
 # Les tests ne doivent pas ecrire dans checkpoints/pipeline.sqlite : base en memoire.
 os.environ.setdefault("CHECKPOINT_DB", ":memory:")
 os.environ.setdefault("ATTENTE_RELANCE", "0")
+# Les tests n'ecrivent pas dans logs/pipeline.log (le journal des vrais runs)
+os.environ.setdefault("LOG_FICHIER", "")
+# La file d'attente des tests reste en memoire (pas de checkpoints/file_attente.json)
+os.environ.setdefault("FILE_ATTENTE_JSON", "")
 from tests import sorties  # noqa: E402
 
 SORTIES_PAR_DEFAUT = {
@@ -24,6 +28,9 @@ SORTIES_PAR_DEFAUT = {
     "generer_dockerisation": sorties.SORTIE_DOCKER,
     "appliquer_corrections_dockerisation": sorties.SORTIE_DOCKER,
     "valider_dockerisation": sorties.DOCKER_OK,
+    "generer_tests_e2e": sorties.PLAN_E2E,
+    "executer_tests_e2e": sorties.E2E_OK,
+    "corriger_scenarios_e2e": None,
 }
 
 
@@ -35,6 +42,8 @@ def agents(tmp_path, monkeypatch):
     Le test s'execute dans tmp_path : l'archivage des sorties en debut de run ne
     touche ni output/ ni archives/ du projet."""
     monkeypatch.chdir(tmp_path)
+    # Les tests ne dependent pas du .env du poste : tests E2E actives par defaut
+    monkeypatch.setenv("E2E_ACTIF", "1")
     with ExitStack() as pile:
         mocks = {
             nom: pile.enter_context(patch(f"src.agent_orchestrateur.noeuds.{nom}", return_value=sortie))

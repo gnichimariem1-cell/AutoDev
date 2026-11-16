@@ -1,4 +1,4 @@
-﻿from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field
 from typing import Literal
 
 class BesoinUtilisateur(BaseModel):
@@ -86,3 +86,59 @@ class RapportValidationDocker(BaseModel):
     # True si l'echec vient de la machine (ex : port deja occupe) et non de la
     # configuration generee : inutile alors de demander une correction a Claude.
     erreur_environnement: bool = False
+
+
+class ScenarioE2E(BaseModel):
+    """Un scenario ecrit par l'Agent E2E"""
+    id: str
+    type: str = "api"
+    user_story: str = ""
+    description: str = ""
+
+class SortieAgentE2E(BaseModel):
+    """Sortie de l'Agent E2E : les scenarios ecrits dans <output>/e2e/"""
+    scenarios: list[ScenarioE2E] = []
+    fichiers: list[str] = []
+    active: bool = True  # False : E2E desactive ou Docker non joignable
+
+class EchecE2E(BaseModel):
+    """Un scenario E2E en echec"""
+    id: str
+    type: str = "api"
+    test: str = ""
+    message: str = ""
+    # "application" ou "scenario" ; vide : deduite du message (voir agent_e2e.cause_de_l_echec)
+    cause: str = ""
+
+class CaptureE2E(BaseModel):
+    """Preuves d'un scenario d'interface : capture de fin et video (chemins depuis la racine d'AutoDev)"""
+    id: str
+    image: str = ""
+    video: str = ""
+    etapes: list[str] = []  # captures aux etapes cles (fixture etape("nom")), dans l'ordre
+
+class EssaiE2E(BaseModel):
+    """Un essai des Tests E2E : resultat et scenarios en echec (message court, qui corrige)"""
+    numero: int
+    reussis: int = 0
+    total: int = 0
+    echecs: list[EchecE2E] = []  # message raccourci ; cause = "Agent E2E", "Developer" ou "Frontend"
+
+
+class RapportE2E(BaseModel):
+    """Resultat des scenarios E2E joues sur l'application demarree"""
+    docker_disponible: bool
+    succes: bool
+    total: int = 0
+    reussis: int = 0
+    echecs: list[EchecE2E] = []
+    erreurs: list[str] = []
+    erreur_environnement: bool = False
+    navigateur: bool = True  # False : Chromium absent, seuls les scenarios API ont ete lances
+    # Scenarios ignores (pytest.skip) : ils n'ont rien verifie, le message donne la raison
+    ignores: list[EchecE2E] = []
+    # Captures et videos des scenarios d'interface (navigateur Chromium)
+    captures: list[CaptureE2E] = []
+    remarque: str = ""
+    # Tous les essais de ce run, dans l'ordre (le dernier est ce rapport)
+    essais: list[EssaiE2E] = []

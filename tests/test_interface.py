@@ -61,8 +61,20 @@ def test_barre_succes_complet():
     resultat = {"id_run": "r1", "succes": True, "user_stories": 1, "architecture": 1,
                 "plan_tests": _NS(cas=list(range(37))), "sortie_dev": 1, "rapport_backend": ok,
                 "sortie_frontend": 1, "rapport_frontend": ok, "rapport_dockerisation": 1,
-                "rapport_validation_docker": ok}
+                "rapport_validation_docker": ok, "plan_e2e": _NS(active=True, scenarios=[1, 2, 3]),
+                "rapport_e2e": _NS(succes=True, docker_disponible=True, reussis=3, total=3)}
     e = _etats(resultat)
     assert all(etat == "ok" for etat, _ in e.values())
+    assert e["Agent E2E"] == ("ok", "3 scenarios") and e["Tests E2E"] == ("ok", "3/3")
     assert e["QA Backend"] == ("ok", "37/37")
     assert "termine avec succes" in barre_etapes(resultat)
+
+def test_erreurs_e2e_affichees_dans_le_detail():
+    """Les scenarios E2E en echec apparaissent dans « Erreurs trouvees par les controles »."""
+    from src.agent_form.app import _details
+    from tests import sorties as s
+    resultat = {"id_run": "r1", "succes": True, "rapport_e2e": s.E2E_KO}
+    assert "Erreurs trouvees par les controles" in _details(resultat)
+    assert "attendu 422, obtenu 201" in _details(resultat)
+    desactive = _NS(docker_disponible=False, succes=False, erreurs=["Tests E2E desactives (E2E_ACTIF=0)."])
+    assert "Erreurs trouvees" not in _details({"id_run": "r1", "succes": True, "rapport_e2e": desactive})

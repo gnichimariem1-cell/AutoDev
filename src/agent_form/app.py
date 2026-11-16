@@ -21,6 +21,9 @@ from src.agent_orchestrateur.orchestrateur import (
     rejouer_pipeline_en_direct, point_de_rejeu, ETAPES_REJOUABLES,
     historique_runs, etat_du_run, FICHIER_ID_RUN,
 )
+from src.agent_orchestrateur.file_attente import (
+    FileAttente, chemin_par_defaut, conseil, EN_ATTENTE, EN_COURS, TERMINE, ECHEC, ARRETE_MACHINE, REMIS,
+)
 
 LONGUEUR_MAX_DESCRIPTION = 1000
 LONGUEUR_MAX_CHAMP_COURT = 200
@@ -197,6 +200,35 @@ def _section_validation_docker(resultat) -> str:
     return texte
 
 
+def _section_agent_e2e(resultat) -> str:
+    plan = resultat.get("plan_e2e")
+    if not plan:
+        return "9. Agent E2E\n   (non atteint)\n"
+    if not plan.active:
+        return "9. Agent E2E — NON EFFECTUE (desactive ou Docker non joignable)\n"
+    lignes = [f"   - {s.id} [{s.type}] {s.user_story} : {s.description}" for s in plan.scenarios]
+    return f"9. Agent E2E — OK ({len(plan.scenarios)} scenarios)\n" + "\n".join(lignes) + "\n"
+
+
+def _section_tests_e2e(resultat) -> str:
+    rapport = resultat.get("rapport_e2e")
+    if not rapport:
+        return "10. Tests E2E\n   (non atteint)\n"
+    if not rapport.docker_disponible:
+        return "10. Tests E2E — NON EFFECTUES\n   " + " ".join(rapport.erreurs) + "\n"
+    tentative = resultat.get("tentative_e2e", 1)
+    statut = "OK" if rapport.succes else "SCENARIOS EN ECHEC (le run n'est pas bloque)"
+    texte = (f"10. Tests E2E — {statut} : {rapport.reussis}/{rapport.total} scenarios reussis "
+             f"(essai {tentative}/{MAX_TENTATIVES})\n")
+    if rapport.remarque:
+        texte += f"   {rapport.remarque}\n"
+    for ignore in getattr(rapport, "ignores", None) or []:
+        texte += f"   NON VERIFIE {ignore.id} (ignore) : {ignore.message}\n"
+    if not rapport.succes:
+        texte += "   Erreurs :\n" + "\n".join(f"     - {e[:500]}" for e in rapport.erreurs) + "\n"
+    return texte
+
+
 SECTIONS = {
     "Product Owner": _section_product_owner,
     "Architect": _section_architect,
@@ -207,6 +239,8 @@ SECTIONS = {
     "QA Frontend": _section_qa_frontend,
     "Dockerization": _section_dockerization,
     "Validation Docker": _section_validation_docker,
+    "Agent E2E": _section_agent_e2e,
+    "Tests E2E": _section_tests_e2e,
 }
 TOUTES_LES_SECTIONS = list(SECTIONS.keys())
 
@@ -226,6 +260,9 @@ LIBELLES_NOEUDS = {
     "dockerization": "Dockerization Agent",
     "validation_docker": "Docker Validation Agent",
     "correction_docker": "Correction de la config Docker",
+    "generation_e2e": "Agent E2E",
+    "e2e": "Tests E2E",
+    "correction_e2e": "Correction apres les tests E2E",
     "echec": "Arret du pipeline",
 }
 
@@ -346,6 +383,19 @@ def _demarrer_run(evenements, id_run="") -> RunEnArrierePlan | None:
             return None
         _run_actif = RunEnArrierePlan(evenements, id_run)
         return _run_actif
+
+
+def _nouveau_run_de_la_file(besoin):
+    return _demarrer_run(executer_pipeline_en_direct(besoin))
+
+
+def _reprise_de_la_file(id_run):
+    point_de_reprise(id_run)  # leve RepriseImpossible tout de suite (ex : run archive)
+    return _demarrer_run(reprendre_pipeline_en_direct(id_run), id_run)
+
+
+# File d'attente : les projets ajoutes sont lances l'un apres l'autre (voir file_attente.py)
+FILE = FileAttente(_nouveau_run_de_la_file, _reprise_de_la_file, chemin=chemin_par_defaut())
 
 
 def _message_run_deja_en_cours():
@@ -495,9 +545,12 @@ ETAPES_BARRE = [
     ("qa_frontend", "QA Frontend", "rapport_frontend"),
     ("dockerization", "Dockerization", "rapport_dockerisation"),
     ("validation_docker", "Validation Docker", "rapport_validation_docker"),
+    ("generation_e2e", "Agent E2E", "plan_e2e"),
+    ("e2e", "Tests E2E", "rapport_e2e"),
 ]
 # Etape d'echec final (cle "etape" de l'etat) -> noeud du controle concerne
-ETAPE_ECHEC_VERS_NOEUD = {"backend": "qa_backend", "frontend": "qa_frontend", "docker": "validation_docker"}
+ETAPE_ECHEC_VERS_NOEUD = {"backend": "qa_backend", "frontend": "qa_frontend", "docker": "validation_docker",
+                          "e2e": "e2e"}
 STYLES_ETAT = {
     "ok": ("#ECFDF5", "#10B981", "#047857", "✓ "),
     "en_cours": ("#FFF7ED", "#F97316", "#C2410C", "⏳ "),
@@ -530,6 +583,26 @@ def etats_des_etapes(resultat) -> list[tuple[str, str, str]]:
                 detail = f"{len(valeur.cas)} cas" + (" · revises" if resultat.get("tests_revises") else "")
             elif noeud == "qa_backend":
                 detail = f"{valeur.tests_passes}/{valeur.tests_passes + valeur.tests_echoues}"
+            elif noeud == "generation_e2e":
+                if valeur.active:
+                    detail = f"{len(valeur.scenarios)} scenarios"
+                else:
+                    etat, detail = "attention", "non effectue"
+            elif noeud == "e2e":
+                # Un scenario encore en echec apres les corrections ne fait pas echouer le run
+                if not valeur.docker_disponible:
+                    etat, detail = "attention", "non effectues"
+                else:
+                    detail = f"{valeur.reussis}/{valeur.total}"
+                    tentative = resultat.get("tentative_e2e", 1)
+                    if (not valeur.succes and en_cours and valeur.echecs and not valeur.erreur_environnement
+                            and tentative < MAX_TENTATIVES):
+                        etat, detail = "en_cours", f"correction · tentative {tentative}/{MAX_TENTATIVES}"
+                        actif_trouve = True
+                    elif not valeur.succes and noeud == echec_final and valeur.erreur_environnement:
+                        etat, detail = "ko", "machine"
+                    elif not valeur.succes or getattr(valeur, "ignores", None):
+                        etat = "attention"  # en echec, ou des scenarios n'ont rien verifie
             if noeud in ("qa_backend", "qa_frontend", "validation_docker") and not valeur.succes:
                 tentative = resultat.get(
                     {"qa_backend": "tentative_backend", "qa_frontend": "tentative_frontend",
@@ -576,7 +649,8 @@ def barre_etapes(resultat) -> str:
 # --- Interface : onglets « Run en cours » et « Runs existants » ---
 COLONNES_HISTORIQUE = ["Projet", "Date", "Resultat", "Arret a"]
 ETAPES_ECHEC_LISIBLES = {"backend": "QA Backend", "frontend": "QA Frontend", "docker": "Validation Docker",
-                         "docker (machine)": "Validation Docker (machine)"}
+                         "docker (machine)": "Validation Docker (machine)", "e2e": "Tests E2E",
+                         "e2e (machine)": "Tests E2E (machine)"}
 COULEURS_STATUT = {"SUCCES": ("#ECFDF5", "#047857"), "ECHEC": ("#FEF2F2", "#B91C1C"),
                    "PLANTAGE": ("#FEF2F2", "#B91C1C"), "INTERROMPU": ("#FFF7ED", "#C2410C"),
                    "EN COURS": ("#FFF7ED", "#C2410C")}
@@ -590,10 +664,14 @@ MESSAGES_ETAPE = {
     "QA Frontend": "Le QA verifie le frontend.",
     "Dockerization": "Le Dockerization Agent ecrit le Dockerfile et le docker-compose.",
     "Validation Docker": "Le Docker Validation Agent construit et demarre l'application pour verifier qu'elle marche.",
+    "Agent E2E": "L'Agent E2E ecrit des scenarios qui utilisent l'application comme un vrai utilisateur (API et navigateur).",
+    "Tests E2E": "AutoDev demarre l'application et joue les scenarios E2E (API et navigateur Chromium).",
 }
 CORRECTEURS = {"QA Backend": "le Developer corrige le code",
                "QA Frontend": "le Frontend Agent corrige l'interface",
-               "Validation Docker": "le Dockerization Agent corrige la configuration"}
+               "Validation Docker": "le Dockerization Agent corrige la configuration",
+               "Tests E2E": "chaque scenario part vers celui qui peut le corriger (Agent E2E, Developer "
+                            "ou Frontend Agent)"}
 # Style de la page (passe a demo.launch : Gradio 6)
 CSS_AUTODEV = """
 .carte { background: #FFFFFF !important; border: 1px solid #E5E7EB !important;
@@ -785,6 +863,30 @@ def _resume_etape(libelle, resultat) -> str:
             if not r.docker_disponible:
                 return "non effectuee : Docker non joignable"
             return " · ".join(f"{e.nom} {'OK' if e.succes else 'ECHEC'}" for e in r.etapes) or "OK"
+        if libelle == "Agent E2E":
+            plan = resultat["plan_e2e"]
+            if not plan.active:
+                return "non effectue : desactive ou Docker non joignable"
+            n_api = sum(1 for s in plan.scenarios if s.type == "api")
+            return f"{len(plan.scenarios)} scenarios · {n_api} API, {len(plan.scenarios) - n_api} interface"
+        if libelle == "Tests E2E":
+            r = resultat["rapport_e2e"]
+            if not r.docker_disponible:
+                return "non effectues : " + " ".join(r.erreurs)
+            echecs = ", ".join(e.id for e in r.echecs)
+            texte = f"{r.reussis}/{r.total} scenarios reussis" + (f" · en echec : {echecs}" if echecs else "")
+            ignores = getattr(r, "ignores", None) or []
+            if ignores:
+                texte += " · non verifie(s) : " + ", ".join(e.id for e in ignores)
+            if getattr(r, "captures", None):
+                texte += f" · {len(r.captures)} capture(s) et video(s)"
+            essais = resultat.get("tentative_e2e", 1)
+            if essais > 1:
+                texte += f" · corriges en {essais} essais" if r.succes else f" · apres {essais} essais"
+            historique = getattr(r, "essais", None) or []
+            if len(historique) > 1:
+                texte += f" · premier essai : {historique[0].reussis}/{historique[0].total}"
+            return texte + ("" if r.navigateur else " · API seulement (navigateur absent)")
     except (KeyError, AttributeError, TypeError):
         return ""
     return ""
@@ -847,6 +949,53 @@ def _chiffres(resultat) -> str:
             + "</div>")
 
 
+def _miniature(chemin, taille: int = 480) -> str:
+    """Capture reduite (JPEG en base64) pour l'afficher dans la page, ou "" si illisible."""
+    try:
+        import base64
+        import io
+        from PIL import Image
+        with Image.open(chemin) as image:
+            image = image.convert("RGB")
+            image.thumbnail((taille, taille))
+            tampon = io.BytesIO()
+            image.save(tampon, "JPEG", quality=70)
+        return "data:image/jpeg;base64," + base64.b64encode(tampon.getvalue()).decode()
+    except Exception:
+        return ""
+
+
+def _bloc_captures(resultat):
+    """Captures et videos des scenarios d'interface (miniatures seulement quand le run est fini)."""
+    captures = getattr(resultat.get("rapport_e2e"), "captures", None) or []
+    if not captures:
+        return None
+    afficher = not resultat.get("_en_cours")
+    cartes = []
+    for capture in captures[:20]:
+        source = _miniature(capture.image) if afficher and capture.image else ""
+        image = (f'<img src="{source}" style="width:100%;border:1px solid #E5E7EB;border-radius:6px;margin-top:4px">'
+                 if source else "")
+        etapes = ""
+        for chemin in getattr(capture, "etapes", [])[:8]:
+            nom = Path(chemin).stem.split("-", 1)[-1].replace("_", " ")
+            mini = _miniature(chemin, 240) if afficher else ""
+            etapes += (f'<div style="width:112px;font-size:11px;color:#374151">'
+                       + (f'<img src="{mini}" style="width:100%;border:1px solid #E5E7EB;border-radius:4px">'
+                          if mini else "") + f"{_e(nom)}</div>")
+        if etapes:
+            etapes = f'<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">{etapes}</div>'
+        fichiers = " · ".join(_e(f) for f in (capture.image, capture.video) if f)
+        cartes.append(f'<div style="width:240px"><b>{_e(capture.id)}</b>{image}{etapes}'
+                      f'<div style="font-size:11px;color:#6B7280;word-break:break-all">{fichiers}</div></div>')
+    entete = ('<div style="font-size:13px;margin-bottom:8px">Capture de fin, captures des etapes cles et video '
+              "(.webm, a ouvrir avec Chrome) de chaque scenario d'interface, dans les dossiers e2e/captures "
+              "et e2e/etapes de l'application. "
+              "Fermer l'explorateur avant un nouveau run.</div>")
+    return ("Captures et videos des scenarios d'interface", len(captures),
+            entete + f'<div style="display:flex;flex-wrap:wrap;gap:12px">{"".join(cartes)}</div>')
+
+
 def _details(resultat) -> str:
     """Le detail, replie : user stories, plan de test, architecture, erreurs."""
     blocs = []
@@ -877,11 +1026,46 @@ def _details(resultat) -> str:
         blocs.append(("Architecture", len(archi.structure_modules),
                       f'<div style="font-size:13px;color:#111827"><b>Stack :</b> {_e(", ".join(archi.stack_technique))}'
                       f'<ul style="margin:6px 0 0 18px">{modules}</ul></div>'))
+    plan_e2e = resultat.get("plan_e2e")
+    if plan_e2e and plan_e2e.scenarios:
+        rapport_e2e = resultat.get("rapport_e2e")
+        joues = bool(rapport_e2e and rapport_e2e.docker_disponible and rapport_e2e.total)
+        en_echec = {e.id for e in rapport_e2e.echecs} if joues else set()
+        ignores = {e.id for e in getattr(rapport_e2e, "ignores", None) or []} if joues else set()
+        lignes = "".join(
+            f"<tr><td {style_td}>{_e(s.id)}</td><td {style_td}>{_e(s.type)}</td><td {style_td}>{_e(s.user_story)}</td>"
+            f"<td {style_td}>{_e(s.description)}</td><td {style_td}>"
+            f"{('✗ echec' if s.id in en_echec else '○ non verifie' if s.id in ignores else '✓ OK') if joues else '—'}"
+            f"</td></tr>" for s in plan_e2e.scenarios)
+        blocs.append(("Scenarios E2E (Agent E2E)", len(plan_e2e.scenarios),
+                      f"<table {style_table}><tr><th {style_th}>ID</th><th {style_th}>Type</th><th {style_th}>US</th>"
+                      f"<th {style_th}>Scenario</th><th {style_th}>Resultat</th></tr>{lignes}</table>"))
+    historique = getattr(resultat.get("rapport_e2e"), "essais", None) or []
+    if len(historique) > 1 or any(essai.echecs for essai in historique):
+        lignes = ""
+        for essai in historique:
+            if not essai.echecs:
+                lignes += (f"<tr><td {style_td}>{essai.numero}</td><td {style_td}>{essai.reussis}/{essai.total}</td>"
+                           f"<td {style_td}>—</td><td {style_td}>—</td><td {style_td}>✓ tout passe</td></tr>")
+            for echec in essai.echecs:
+                lignes += (f"<tr><td {style_td}>{essai.numero}</td><td {style_td}>{essai.reussis}/{essai.total}</td>"
+                           f"<td {style_td}>{_e(echec.id)} ({_e(echec.type)})</td><td {style_td}>{_e(echec.cause)}</td>"
+                           f"<td {style_td}><code style=\"white-space:pre-wrap\">{_e(echec.message)}</code></td></tr>")
+        blocs.append(("Essais des Tests E2E (erreurs et corrections)", len(historique),
+                      f"<table {style_table}><tr><th {style_th}>Essai</th><th {style_th}>Reussis</th>"
+                      f"<th {style_th}>Scenario</th><th {style_th}>Corrige par</th><th {style_th}>Erreur</th>"
+                      f"</tr>{lignes}</table>"))
+    bloc_captures = _bloc_captures(resultat)
+    if bloc_captures:
+        blocs.append(bloc_captures)
     erreurs = []
     for cle in ("rapport_backend", "rapport_frontend", "rapport_validation_docker"):
         rapport = resultat.get(cle)
         if rapport is not None and not rapport.succes:
             erreurs += [str(err) for err in rapport.erreurs]
+    rapport_e2e = resultat.get("rapport_e2e")
+    if rapport_e2e is not None and rapport_e2e.docker_disponible and not rapport_e2e.succes:
+        erreurs += [str(err) for err in rapport_e2e.erreurs]
     if erreurs:
         items = "".join(f'<li style="margin-bottom:4px"><pre style="white-space:pre-wrap;margin:0;font-size:12px">{_e(err[:1500])}</pre></li>'
                         for err in erreurs[:10])
@@ -1056,21 +1240,126 @@ def _etat_pour_le_suivi(resultat):
     if not run_en_cours():
         return resultat
     id_actif = _run_actif.id_run
-    if resultat and resultat.get("_en_cours"):
+    if resultat and resultat.get("_en_cours") and resultat.get("id_run") == id_actif:
         return resultat
+    evenements = getattr(_run_actif, "evenements", None)
+    if evenements and not (resultat and resultat.get("id_run") == id_actif):
+        # Run que cette page n'a pas lance (file d'attente, autre onglet) : son dernier etat
+        noeud, etat = evenements[-1]
+        return dict(etat, _en_cours=noeud)
+    if resultat and resultat.get("_en_cours") and not id_actif:
+        return resultat
+    depart = _DEPART_DU_RUN.get(id_actif)
+    base = None
     if resultat and id_actif and resultat.get("id_run") == id_actif:
+        base = resultat
+    elif id_actif and depart:
+        # Relance alors que la page suivait un autre run (ou rien, apres un
+        # rechargement) : on part de l'etat sauvegarde du run relance, sinon
+        # l'affichage repartirait du Product Owner.
+        base = etat_du_run(id_actif) or None
+    if base:
         # Relance : on garde les etapes d'avant, et on efface de l'affichage
         # l'etape relancee et les suivantes (leur ancien resultat n'est plus valable).
-        etat = dict(resultat, _en_cours="demarrage")
+        etat = dict(base, id_run=id_actif, _en_cours="demarrage")
         for cle in ("erreur", "etape", "succes"):
             etat.pop(cle, None)
         noeuds = [noeud for noeud, _, _ in ETAPES_BARRE]
-        depart = _DEPART_DU_RUN.get(id_actif)
         if depart in noeuds:
             for _, _, cle in ETAPES_BARRE[noeuds.index(depart):]:
                 etat.pop(cle, None)
         return etat
     return {"id_run": id_actif, "_en_cours": "demarrage"}
+
+
+# --- File d'attente (onglet « Run en cours ») ---
+
+COULEURS_FILE = {EN_ATTENTE: ("#F1F5F9", "#475569"), EN_COURS: ("#FFF7ED", "#C2410C"),
+                 TERMINE: ("#ECFDF5", "#047857"), ECHEC: ("#FEF2F2", "#B91C1C"),
+                 ARRETE_MACHINE: ("#FEF2F2", "#B91C1C"), REMIS: ("#F1F5F9", "#6B7280")}
+
+
+def vue_file() -> str:
+    elements = FILE.copie()
+    if FILE.en_pause:
+        etat = (f'<div style="color:#991B1B;margin:6px 0">⏸ En pause : {_e(FILE.raison_pause)}<br>'
+                f'<b>A faire :</b> {_e(conseil(FILE.raison_pause))}, puis clique sur « Reprendre la file ».</div>')
+    elif any(e.statut in (EN_ATTENTE, EN_COURS) for e in elements):
+        etat = '<div style="color:#047857;margin:6px 0">▶ En marche : les projets passent l\'un apres l\'autre.</div>'
+    elif elements:
+        etat = ('<div style="color:#6B7280;margin:6px 0">Rien en attente : tous les projets sont passes. '
+                'Un projet en echec peut etre remis dans la file avec « Remettre dans la file ».</div>')
+    else:
+        etat = ('<div style="color:#6B7280;margin:6px 0">Vide. Remplis « Nouveau projet », puis clique sur '
+                '« Ajouter a la file d\'attente » : tu peux en ajouter plusieurs.</div>')
+    lignes = ""
+    for element in elements:
+        fond, couleur = COULEURS_FILE.get(element.statut, ("#F1F5F9", "#475569"))
+        detail = f" · {_e(element.message)}" if element.message else ""
+        ident = f' <span style="color:#9CA3AF;font-size:12px">{_e(element.id_run)}</span>' if element.id_run else ""
+        lignes += (f'<li style="margin:4px 0">{_e(element.titre)}{ident} '
+                   f'{_puce(element.statut, fond, couleur)}<span style="font-size:13px;color:#4B5563">{detail}</span></li>')
+    liste = f'<ol style="margin:4px 0 0 18px">{lignes}</ol>' if lignes else ""
+    return ('<div style="border:1px solid #E5E7EB;border-radius:12px;padding:12px 16px;background:#FFFFFF;'
+            f'margin-top:10px"><b>File d\'attente</b> ({len(elements)}){etat}{liste}</div>')
+
+
+def ajouter_a_la_file(titre, description, utilisateurs, fonctionnalites, structure):
+    """Bouton « Ajouter a la file d'attente ». Sorties : message, vue de la file."""
+    erreur_validation = valider_besoin(titre, description, utilisateurs, fonctionnalites, structure)
+    if erreur_validation:
+        return alerte_depuis_texte(f"⚠️ Entree refusee : {erreur_validation}"), vue_file()
+    element = FILE.ajouter(collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure))
+    position = sum(1 for e in FILE.copie() if e.statut in (EN_ATTENTE, EN_COURS))
+    message = (f"✔ « {element.titre} » ajoute a la file (position {position}). "
+               "Tu peux remplir un autre projet et l'ajouter aussi.")
+    if FILE.en_pause:
+        message += " La file est en pause : voir « Run en cours »."
+    return (f'<div style="border:1px solid #A7F3D0;background:#ECFDF5;color:#065F46;border-radius:10px;'
+            f'padding:10px 14px;font-size:14px">{_e(message)}</div>'), vue_file()
+
+
+def reprendre_la_file():
+    FILE.reprendre()
+    return vue_file()
+
+
+def mettre_la_file_en_pause():
+    FILE.mettre_en_pause()
+    return vue_file()
+
+
+def vider_la_file():
+    FILE.vider()
+    FILE.retirer_les_termines()
+    return vue_file()
+
+
+def choix_des_echecs() -> list[str]:
+    """Projets en echec de la file, pour la liste « Remettre dans la file »."""
+    return [f"n° {e.numero} · {e.titre}" for e in FILE.echecs()]
+
+
+def liste_des_echecs(choix_affiches):
+    """Mise a jour de la liste seulement si elle a change (sinon le choix en cours serait perdu).
+    Sorties : liste, choix affiches."""
+    choix = choix_des_echecs()
+    if choix == (choix_affiches or []):
+        return gr.update(), choix
+    return gr.update(choices=choix, value=choix[0] if choix else None, interactive=bool(choix)), choix
+
+
+def rafraichir_file(choix_affiches):
+    """Toutes les 5 s. Sorties : vue de la file, liste des echecs, choix affiches."""
+    return (vue_file(), *liste_des_echecs(choix_affiches))
+
+
+def remettre_dans_la_file(choix, choix_affiches):
+    """Bouton « Remettre dans la file ». Sorties : vue de la file, liste des echecs, choix affiches."""
+    numero = re.match(r"n° (\d+)", choix or "")
+    if numero:
+        FILE.remettre(int(numero.group(1)))
+    return rafraichir_file(None)
 
 
 def vue_suivi(resultat):
@@ -1120,11 +1409,24 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
             utilisateurs = gr.Textbox(label="Utilisateurs cibles", placeholder="Ex: Etudiants, particuliers...")
             fonctionnalites = gr.Textbox(label="Fonctionnalites cles (separees par virgules)", placeholder="login, creer tache, marquer terminee")
             structure = gr.Textbox(label="Organisation de l'interface", lines=2, placeholder="Ex: pages/sections souhaitees, organisation generale (optionnel)")
-            bouton_lancer = gr.Button("Lancer le pipeline", variant="primary")
+            with gr.Row():
+                bouton_lancer = gr.Button("Lancer le pipeline", variant="primary")
+                bouton_ajouter_file = gr.Button("Ajouter a la file d'attente")
+            message_file = gr.HTML()
 
         with gr.Tab("Run en cours", id="en_cours") as onglet_en_cours:
             alerte = gr.HTML()
             suivi = gr.HTML(vue_run(None))
+            bloc_file = gr.HTML(vue_file())
+            with gr.Row():
+                bouton_reprendre_file = gr.Button("Reprendre la file", size="sm")
+                bouton_pause_file = gr.Button("Mettre en pause", size="sm")
+                bouton_vider_file = gr.Button("Vider la file", size="sm")
+            with gr.Row(equal_height=True):
+                liste_echecs = gr.Dropdown(choices=choix_des_echecs(), label="Projet en echec", scale=3,
+                                           value=(choix_des_echecs() or [None])[0], interactive=bool(choix_des_echecs()))
+                bouton_remettre = gr.Button("Remettre dans la file", size="sm", scale=1)
+            echecs_affiches = gr.State(choix_des_echecs())
             with gr.Accordion("Rapport detaille (texte brut)", open=False):
                 resultat_texte = gr.Textbox(show_label=False, lines=22)
 
@@ -1196,6 +1498,16 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
     resultat_texte.change(fn=alerte_depuis_texte, inputs=resultat_texte, outputs=alerte)
     minuteur = gr.Timer(5)
     minuteur.tick(fn=rafraichir_suivi, inputs=resultat_state, outputs=[suivi, onglet_en_cours])
+    minuteur.tick(fn=rafraichir_file, inputs=echecs_affiches, outputs=[bloc_file, liste_echecs, echecs_affiches])
+    # File d'attente
+    bouton_ajouter_file.click(fn=ajouter_a_la_file,
+                              inputs=[titre, description, utilisateurs, fonctionnalites, structure],
+                              outputs=[message_file, bloc_file])
+    bouton_reprendre_file.click(fn=reprendre_la_file, outputs=bloc_file)
+    bouton_pause_file.click(fn=mettre_la_file_en_pause, outputs=bloc_file)
+    bouton_vider_file.click(fn=vider_la_file, outputs=bloc_file)
+    bouton_remettre.click(fn=remettre_dans_la_file, inputs=[liste_echecs, echecs_affiches],
+                          outputs=[bloc_file, liste_echecs, echecs_affiches])
     # Onglet « Runs existants »
     table_runs.select(
         fn=choisir_run, inputs=[ids_runs],

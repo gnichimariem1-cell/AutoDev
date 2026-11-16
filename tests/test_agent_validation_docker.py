@@ -127,3 +127,79 @@ def test_sec07_dockerfile_en_root_refuse(mock_compose, tmp_path, dockerfile):
 def test_sec07_utilisateur_final():
     assert validation_docker.utilisateur_final("FROM a\nUSER app\nFROM b\nUSER web") == "web"
     assert validation_docker.utilisateur_final("FROM a\nRUN x") is None
+
+
+# Trouve par l'Agent E2E (run Cabinet medical) : le frontend montait ./frontend par un volume.
+# Lance depuis le conteneur AutoDev, le dossier etait vide et nginx repondait 404,
+# mais la Validation Docker acceptait (404 < 500).
+
+@patch.object(validation_docker, "_commande_compose", return_value=["docker", "compose"])
+def test_dossier_monte_par_un_volume_refuse(mock_compose, tmp_path):
+    config = {"services": {
+        "app": {"ports": [{"target": 8000, "published": "8000"}]},
+        "frontend": {"ports": [{"target": 80, "published": "8080"}], "volumes": [
+            {"type": "bind", "source": "/app/output/frontend", "target": "/usr/share/nginx/html"}]},
+        "db": {"volumes": [{"type": "volume", "source": "db_data", "target": "/var/lib/postgresql/data"}]},
+    }}
+    faux = MagicMock(return_value=MagicMock(returncode=0, stdout=json.dumps(config), stderr=""))
+    with patch.object(validation_docker, "_executer", faux):
+        rapport = valider_dockerisation(_dossier_docker(tmp_path))
+
+    assert rapport.succes is False and rapport.erreur_environnement is False  # envoye au Dockerization Agent
+    assert "frontend : /app/output/frontend -> /usr/share/nginx/html" in rapport.erreurs[0]
+    assert "db :" not in rapport.erreurs[0]  # un volume nomme (db_data) est autorise
+    assert "COPY" in rapport.erreurs[0]
+
+
+@patch.object(validation_docker, "_attendre_reponse_http", return_value=None)
+@patch.object(validation_docker, "_commande_compose", return_value=["docker", "compose"])
+def test_frontend_doit_repondre_200(mock_compose, mock_http, tmp_path):
+    with patch.object(validation_docker, "_executer", _faux_compose()):
+        valider_dockerisation(_dossier_docker(tmp_path))
+    mock_http.assert_any_call("http://localhost:8080/", validation_docker.DEMARRAGE_TIMEOUT, exige_200=True)
+
+
+def test_reponse_404_refusee_seulement_si_200_exige():
+    with patch.object(validation_docker.requests, "get", return_value=MagicMock(status_code=404)), \
+            patch.object(validation_docker.time, "sleep"):
+        assert validation_docker._attendre_reponse_http("http://x/", 0.05) is None
+        assert validation_docker._attendre_reponse_http("http://x/", 0.05, exige_200=True) == "code HTTP 404"
+
+
+# Trouve sur le chatbot Assistant equipe : le backend lancait claude, absent de l'image.
+
+def _backend_qui_appelle_claude(tmp_path):
+    services = tmp_path / "backend" / "app" / "services"
+    services.mkdir(parents=True)
+    (services / "claude_client.py").write_text(
+        'cmd = ["claude", "-p", "--tools", "", "--strict-mcp-config"]\n')
+    (tmp_path / "backend" / "tests").mkdir()
+    (tmp_path / "backend" / "tests" / "test_x.py").write_text('cmd = ["git", "status"]\n')  # ignore
+
+
+@patch.object(validation_docker, "_attendre_reponse_http", return_value=None)
+@patch.object(validation_docker, "_commande_compose", return_value=["docker", "compose"])
+def test_commande_du_backend_absente_de_l_image(mock_compose, mock_http, tmp_path):
+    dossier = _dossier_docker(tmp_path)
+    _backend_qui_appelle_claude(tmp_path)
+    faux = _faux_compose(echecs={"exec": "not found"})
+    with patch.object(validation_docker, "_executer", faux):
+        rapport = valider_dockerisation(dossier)
+    assert rapport.succes is False and rapport.erreur_environnement is False  # envoye au Dockerization Agent
+    assert "commande claude, absente de l'image" in rapport.erreurs[0]
+    assert "npm install -g @anthropic-ai/claude-code" in rapport.erreurs[0]
+    assert faux.call_args_list[-1].args[1][0] == "down"
+
+
+@patch.object(validation_docker, "_attendre_reponse_http", return_value=None)
+@patch.object(validation_docker, "_commande_compose", return_value=["docker", "compose"])
+def test_commande_du_backend_presente(mock_compose, mock_http, tmp_path):
+    dossier = _dossier_docker(tmp_path)
+    _backend_qui_appelle_claude(tmp_path)
+    faux = _faux_compose()
+    with patch.object(validation_docker, "_executer", faux):
+        rapport = valider_dockerisation(dossier)
+    assert rapport.succes is True
+    assert rapport.etapes[-1].nom == "commandes" and rapport.etapes[-1].details == "claude"
+    verifiees = [c.args[1] for c in faux.call_args_list if c.args[1][0] == "exec"]
+    assert verifiees == [["exec", "-T", "app", "sh", "-c", "command -v claude"]]  # pas git (dans tests/)

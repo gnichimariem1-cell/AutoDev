@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 from src.common.schemas import BesoinUtilisateur, SortiePO, SortieDev, SortieArchitecte
 from src.agent_test.testeur import CONTRAT_TECHNIQUE, bloc_besoin
+from src.common.regles import bloc_regles
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
 
@@ -55,7 +56,7 @@ les champs JSON et les codes de reponse attendus. Ecris le code pour qu'ils pass
 - respecte ce contrat technique, que les tests utilisent :
 {CONTRAT_TECHNIQUE}
 - ajoute pytest et httpx dans requirements.txt
-
+{bloc_regles('developer')}
 Écris les fichiers directement sur disque."""
 
     resultat = subprocess.run(
@@ -78,7 +79,8 @@ def appliquer_corrections(rapport_erreurs: list[str], dossier_sortie: str = "out
 {json.dumps(rapport_erreurs, ensure_ascii=False, indent=2)}
 
 Ne modifie PAS et ne supprime PAS les fichiers de tests ({dossier_sortie}/tests/) :
-corrige uniquement le code de l'application pour que les tests existants passent."""
+corrige uniquement le code de l'application pour que les tests existants passent.
+{bloc_regles('developer')}"""
     resultat = subprocess.run(
         [CLAUDE_BIN, "-p", "--allowedTools", "Write,Edit,Bash"],
         input=prompt,

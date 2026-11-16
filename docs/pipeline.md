@@ -27,6 +27,9 @@ graph TD;
 	dockerization(dockerization)
 	validation_docker(validation_docker)
 	correction_docker(correction_docker)
+	generation_e2e(generation_e2e)
+	e2e(e2e)
+	correction_e2e(correction_e2e)
 	echec(echec)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> po;
@@ -36,14 +39,21 @@ graph TD;
 	correction_backend -. &nbsp;continuer&nbsp; .-> qa_backend;
 	correction_docker -. &nbsp;abandon&nbsp; .-> echec;
 	correction_docker -. &nbsp;continuer&nbsp; .-> validation_docker;
+	correction_e2e -. &nbsp;continuer&nbsp; .-> e2e;
+	correction_e2e -. &nbsp;abandon&nbsp; .-> echec;
 	correction_frontend -. &nbsp;abandon&nbsp; .-> echec;
 	correction_frontend -. &nbsp;continuer&nbsp; .-> qa_frontend;
 	developer -. &nbsp;abandon&nbsp; .-> echec;
 	developer -. &nbsp;continuer&nbsp; .-> qa_backend;
 	dockerization -. &nbsp;abandon&nbsp; .-> echec;
 	dockerization -. &nbsp;continuer&nbsp; .-> validation_docker;
+	e2e -. &nbsp;fin&nbsp; .-> __end__;
+	e2e -. &nbsp;corriger&nbsp; .-> correction_e2e;
+	e2e -. &nbsp;abandon&nbsp; .-> echec;
 	frontend -. &nbsp;abandon&nbsp; .-> echec;
 	frontend -. &nbsp;continuer&nbsp; .-> qa_frontend;
+	generation_e2e -. &nbsp;continuer&nbsp; .-> e2e;
+	generation_e2e -. &nbsp;abandon&nbsp; .-> echec;
 	po -. &nbsp;continuer&nbsp; .-> architect;
 	po -. &nbsp;abandon&nbsp; .-> echec;
 	qa_backend -. &nbsp;corriger&nbsp; .-> correction_backend;
@@ -57,9 +67,9 @@ graph TD;
 	revision_tests -. &nbsp;continuer&nbsp; .-> qa_backend;
 	test_agent -. &nbsp;continuer&nbsp; .-> developer;
 	test_agent -. &nbsp;abandon&nbsp; .-> echec;
-	validation_docker -. &nbsp;ok&nbsp; .-> __end__;
 	validation_docker -. &nbsp;corriger&nbsp; .-> correction_docker;
 	validation_docker -. &nbsp;abandon&nbsp; .-> echec;
+	validation_docker -. &nbsp;ok&nbsp; .-> generation_e2e;
 	echec --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0

@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 
 from src.common.schemas import BesoinUtilisateur, SortiePO, SortieArchitecte, SortieTestAgent
+from src.common.regles import bloc_regles
 
 CLAUDE_BIN = shutil.which("claude") or "claude"
 
@@ -132,7 +133,7 @@ User Stories :
 {user_stories.model_dump_json(indent=2)}
 
 {bloc_besoin(besoin, "Chaque comportement decrit dans ce besoin doit avoir au moins un cas de test, meme si aucune User Story ne le reprend (ex : ce qu'un role fait doit etre visible par l'autre role si la description le dit).")}{bloc_architecture}{CONTRAT_TECHNIQUE}
-
+{bloc_regles('test_agent')}
 Travail demande :
 1. Concois un plan de test : pour chaque user story, au moins un cas nominal et un cas d'erreur
    (ex : donnees invalides -> 422, ressource inexistante -> 404, acces sans authentification -> 401).
@@ -172,7 +173,7 @@ Plan de test d'origine :
 {plan.model_dump_json(indent=2)}
 
 {CONTRAT_TECHNIQUE}
-
+{bloc_regles('test_agent')}
 Verifie chaque test qui echoue :
 - si le TEST est faux (erreur dans le test, attente contraire au plan ou au contrat), corrige le test ;
 - si le test est correct et que c'est le code qui ne respecte pas le plan, NE CHANGE PAS le test.

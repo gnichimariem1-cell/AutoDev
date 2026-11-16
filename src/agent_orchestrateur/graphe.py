@@ -1,7 +1,10 @@
 """Assemblage du graphe LangGraph du pipeline :
 
 START -> po -> architect -> test_agent -> developer -> qa_backend -> frontend -> qa_frontend
-      -> dockerization -> validation_docker -> END
+      -> dockerization -> validation_docker -> generation_e2e -> e2e -> END
+
+Apres les tests E2E (router_e2e) : "corriger" vers correction_e2e (qui reboucle sur e2e),
+"fin" vers END : les scenarios encore en echec apres MAX_TENTATIVES ne bloquent pas le run.
 
 Chaque QA a trois sorties (voir routage.py) : "ok" vers l'etape suivante,
 "corriger" vers son noeud de correction (qui reboucle sur le QA), "abandon"
@@ -21,6 +24,7 @@ from src.agent_orchestrateur.etat import EtatPipeline, MAX_TENTATIVES
 from src.agent_orchestrateur import noeuds
 from src.agent_orchestrateur.routage import (
     continuer_ou_abandonner, router_qa_backend, router_qa_frontend, router_validation_docker,
+    router_e2e,
 )
 
 # Nombre de noeuds executes dans le pire cas : po, architect, test_agent,
@@ -29,6 +33,8 @@ from src.agent_orchestrateur.routage import (
 # ce qui serait depasse des MAX_TENTATIVES=4 : on calcule donc la limite.
 # + revision_tests puis une seconde serie de MAX_TENTATIVES QA backend
 LIMITE_RECURSION = 7 + 3 * (2 * MAX_TENTATIVES - 1) + 2 * MAX_TENTATIVES + 5
+# + generation_e2e, puis la boucle e2e / correction_e2e
+LIMITE_RECURSION += 2 * MAX_TENTATIVES
 
 FICHIER_SCHEMA = Path("docs/pipeline.md")
 
@@ -49,6 +55,9 @@ def construire_graphe(checkpointer=None):
     graphe.add_node("dockerization", noeuds.noeud_dockerization)
     graphe.add_node("validation_docker", noeuds.noeud_validation_docker)
     graphe.add_node("correction_docker", noeuds.noeud_correction_docker)
+    graphe.add_node("generation_e2e", noeuds.noeud_generation_e2e)
+    graphe.add_node("e2e", noeuds.noeud_e2e)
+    graphe.add_node("correction_e2e", noeuds.noeud_correction_e2e)
     graphe.add_node("echec", noeuds.noeud_echec)
 
     def enchainer(source: str, suivant: str):
@@ -77,9 +86,15 @@ def construire_graphe(checkpointer=None):
 
     enchainer("dockerization", "validation_docker")
     graphe.add_conditional_edges("validation_docker", router_validation_docker, {
-        "ok": END, "corriger": "correction_docker", "abandon": "echec",
+        "ok": "generation_e2e", "corriger": "correction_docker", "abandon": "echec",
     })
     enchainer("correction_docker", "validation_docker")
+
+    enchainer("generation_e2e", "e2e")
+    graphe.add_conditional_edges("e2e", router_e2e, {
+        "fin": END, "corriger": "correction_e2e", "abandon": "echec",
+    })
+    enchainer("correction_e2e", "e2e")
 
     graphe.add_edge("echec", END)
 

@@ -19,6 +19,8 @@ def test_generer_code_appelle_claude_et_liste_fichiers(mock_run, tmp_path):
     assert "CORSMiddleware" in prompt
     assert "Ne génère PAS de Dockerfile ni de docker-compose.yml" in prompt
     assert "README.md" in prompt
+    assert "jamais .local" in prompt
+    assert "--strict-mcp-config" in prompt
 
 
 @patch("src.agent_dev.developer.subprocess.run")

@@ -1,4 +1,4 @@
-﻿from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -61,7 +61,13 @@ def test_generer_dockerisation_sans_bash_ni_lancement_docker(mock_run):
     generer_dockerisation("output/backend", "output/frontend")
     commande = mock_run.call_args.args[0]
     assert "Bash" not in commande[commande.index("--allowedTools") + 1]
-    assert "Ne lance PAS docker" in mock_run.call_args.kwargs["input"]
+    prompt = mock_run.call_args.kwargs["input"]
+    assert "Aucun mot de passe ni secret en clair" in prompt
+    assert "N'execute aucune commande" in prompt
+    assert "Aucun volume qui monte un dossier du projet" in prompt  # nginx en 404 dans l'Agent E2E
+    assert "FROM nginx:alpine puis COPY" in prompt
+    assert "npm install -g @anthropic-ai/claude-code" in prompt  # chatbot : claude absent de l'image
+    assert "jamais .local" in prompt  # ADMIN_EMAIL en .local : connexion en 500 (trouve par l'Agent E2E)
 
 
 def test_nommer_projet_compose_ajoute_le_nom_en_tete(tmp_path):
@@ -86,3 +92,18 @@ def test_nommer_projet_compose_remplace_un_nom_existant(tmp_path):
 def test_nommer_projet_compose_sans_fichier(tmp_path):
     nommer_projet_compose(str(tmp_path), "run-3")
     assert not (tmp_path / "docker-compose.yml").exists()
+
+
+def test_nommer_projet_compose_nettoie_le_nom(tmp_path):
+    """Nom de projet Compose : minuscules, chiffres, - et _ seulement."""
+    compose = tmp_path / "docker-compose.yml"
+    compose.write_text("services: {}\n", encoding="utf-8")
+    nommer_projet_compose(str(tmp_path), "Bibliothèque du Collège-20261012")
+    assert compose.read_text(encoding="utf-8").startswith("name: biblioth-que-du-coll-ge-20261012\n")
+
+
+def test_dockerfile_autodev_sans_tampon():
+    """SEC-09 : l'avertissement de demarrage doit apparaitre dans docker compose logs."""
+    from pathlib import Path
+    racine = Path(__file__).resolve().parent.parent
+    assert "PYTHONUNBUFFERED=1" in (racine / "Dockerfile").read_text(encoding="utf-8-sig")

@@ -3,12 +3,15 @@ Dockerization Agent fonctionne reellement, sans IA (verifications deterministes)
 
 1. fichiers presents (Dockerfile, docker-compose.yml)
    + le Dockerfile n'execute pas l'application en root (instruction USER)
-2. `docker compose config` : le YAML est valide
+2. `docker compose config` : le YAML est valide, aucun dossier du projet monte par un volume
+   (il serait vide quand l'application est lancee depuis le conteneur AutoDev)
    + ports publies libres sur la machine (sinon erreur d'environnement,
    non transmise a Claude : la configuration n'est pas en cause)
 3. `docker compose build` : les images se construisent
 4. `docker compose up -d` : les conteneurs demarrent
 5. les services "app" (backend) et "frontend" repondent en HTTP
+   + les commandes lancees par le backend (ex : claude) existent dans l'image app
+   (frontend : la page d'accueil doit renvoyer 200, un 404 de nginx ne suffit pas)
 6. `docker compose down -v` : nettoyage systematique, meme en cas d'echec
 
 Les erreurs (avec les logs des conteneurs) sont renvoyees a l'orchestrateur,
@@ -28,6 +31,7 @@ from pathlib import Path
 import requests
 
 from src.common.schemas import RapportValidationDocker, EtapeValidationDocker
+from src.common.commandes_externes import commandes_utilisees
 
 NOM_PROJET = "autodev-validation"
 SERVICES_HTTP = ["app", "frontend"]
@@ -73,15 +77,15 @@ def _port_occupe(port: int) -> bool:
         return False
 
 
-def _attendre_reponse_http(url: str, timeout: int) -> str | None:
-    """Interroge url jusqu'a obtenir une reponse HTTP < 500. Retourne None si OK,
-    sinon le dernier probleme rencontre."""
+def _attendre_reponse_http(url: str, timeout: int, exige_200: bool = False) -> str | None:
+    """Interroge url jusqu'a obtenir une reponse HTTP < 500 (exactement 200 si exige_200).
+    Retourne None si OK, sinon le dernier probleme rencontre."""
     limite = time.monotonic() + timeout
     probleme = "aucune reponse"
     while time.monotonic() < limite:
         try:
             reponse = requests.get(url, timeout=5)
-            if reponse.status_code < 500:
+            if reponse.status_code == 200 or (not exige_200 and reponse.status_code < 500):
                 return None
             probleme = f"code HTTP {reponse.status_code}"
         except requests.RequestException as e:
@@ -150,6 +154,20 @@ def valider_dockerisation(dossier: str = "output") -> RapportValidationDocker:
     services_absents = [s for s in SERVICES_HTTP if s not in config.get("services", {})]
     if services_absents:
         return echec("config", f"services absents de docker-compose.yml : {', '.join(services_absents)}")
+    montages = [
+        f"{nom} : {v.get('source', '?')} -> {v.get('target', '?')}"
+        for nom, service in config.get("services", {}).items()
+        for v in service.get("volumes") or [] if isinstance(v, dict) and v.get("type") == "bind"
+    ]
+    if montages:
+        return echec(
+            "config",
+            "dossier(s) du projet montes par un volume : " + " ; ".join(montages) + ". "
+            "Lance depuis un autre Docker (conteneur AutoDev, autre poste), ce dossier serait vide "
+            "(nginx repondrait 404). Copier les fichiers dans l'image (Dockerfile avec COPY, "
+            "ex : frontend/Dockerfile FROM nginx:alpine + COPY . /usr/share/nginx/html) "
+            "et garder seulement des volumes nommes (ex : db_data).",
+        )
     etapes.append(EtapeValidationDocker(nom="config", succes=True))
 
     ports_occupes = [
@@ -182,11 +200,29 @@ def valider_dockerisation(dossier: str = "output") -> RapportValidationDocker:
             if not ports:
                 return echec(f"service {service}", "aucun port publie dans docker-compose.yml")
             url = f"http://{HOTE_VALIDATION}:{ports[0]}/"
-            probleme = _attendre_reponse_http(url, DEMARRAGE_TIMEOUT)
+            if service == "frontend":
+                probleme = _attendre_reponse_http(url, DEMARRAGE_TIMEOUT, exige_200=True)
+                if probleme and "404" in probleme:
+                    probleme += " : page d'accueil introuvable (les pages HTML doivent etre copiees dans l'image)"
+            else:
+                probleme = _attendre_reponse_http(url, DEMARRAGE_TIMEOUT)
             if probleme:
                 logs = _executer(compose, ["logs", "--tail", "50", service], dossier, 60).stdout
                 return echec(f"service {service}", f"{url} ne repond pas ({probleme}).\nLogs :\n{logs}")
             etapes.append(EtapeValidationDocker(nom=f"service {service}", succes=True, details=url))
+        commandes = sorted(commandes_utilisees(Path(dossier) / "backend"))
+        for commande in commandes:
+            resultat = _executer(compose, ["exec", "-T", "app", "sh", "-c", f"command -v {commande}"],
+                                 dossier, 60)
+            if resultat.returncode != 0:
+                return echec("commandes", (
+                    f"le backend lance la commande {commande}, absente de l'image du service app. "
+                    "L'installer dans le Dockerfile du backend, avant l'instruction USER"
+                    + (" : nodejs et npm, puis npm install -g @anthropic-ai/claude-code ; "
+                       "ENV CLAUDE_CONFIG_DIR=/home/app/.claude ; volume nomme sur ce dossier "
+                       "pour garder la connexion" if commande == "claude" else "") + "."))
+        if commandes:
+            etapes.append(EtapeValidationDocker(nom="commandes", succes=True, details=", ".join(commandes)))
     except subprocess.TimeoutExpired as e:
         return echec("timeout", f"commande trop longue : {' '.join(e.cmd)}")
     finally:

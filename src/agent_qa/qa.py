@@ -4,6 +4,7 @@ import json
 import shutil
 from pathlib import Path
 from src.common.schemas import RapportQA, RapportQAFrontend
+from src.common.commandes_externes import problemes_securite_claude
 
 def _env_sans_ros() -> dict:
     """Retire les chemins ROS de PYTHONPATH pour éviter que pytest ne charge
@@ -92,6 +93,9 @@ def lancer_tests(dossier_code: str) -> RapportQA:
             f"Aucun test pytest trouve dans {dossier_code} : ecris des tests (dossier tests/, "
             "fichiers test_*.py) couvrant les endpoints de l'API."
         )
+
+    # Controle sans IA : un appel a claude doit bloquer outils et connecteurs du compte
+    erreurs += problemes_securite_claude(dossier_code)
 
     return RapportQA(
         tests_passes=tests_passes,

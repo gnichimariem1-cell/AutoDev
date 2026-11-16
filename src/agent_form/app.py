@@ -1,3 +1,4 @@
+import functools
 import html
 import os
 import re
@@ -14,7 +15,11 @@ load_dotenv()
 from pathlib import Path
 
 import gradio as gr
-from src.common.schemas import BesoinUtilisateur
+from src.common.logging_config import configurer_logging
+from src.common.schemas import BesoinUtilisateur, AnalyseDemande, ScenarioDemande
+from src.agent_po.analyse_demande import (
+    analyse_active, analyser_demande, analyse_par_les_regles, QUESTIONS_PAR_DEFAUT,
+)
 from src.agent_orchestrateur.etat import MAX_TENTATIVES
 from src.agent_orchestrateur.orchestrateur import (
     executer_pipeline_en_direct, reprendre_pipeline_en_direct, point_de_reprise, RepriseImpossible,
@@ -24,6 +29,8 @@ from src.agent_orchestrateur.orchestrateur import (
 from src.agent_orchestrateur.file_attente import (
     FileAttente, chemin_par_defaut, conseil, EN_ATTENTE, EN_COURS, TERMINE, ECHEC, ARRETE_MACHINE, REMIS,
 )
+
+logger = configurer_logging()
 
 LONGUEUR_MAX_DESCRIPTION = 1000
 LONGUEUR_MAX_CHAMP_COURT = 200
@@ -81,12 +88,21 @@ def collecter_besoin(titre, description, utilisateurs, fonctionnalites, structur
 
 
 def _section_product_owner(resultat) -> str:
+    analyse = resultat.get("demande_a_preciser")
+    if analyse:
+        lignes = [f"   - Scenario {chr(65 + i)} : {sc.titre_projet} — {sc.difference}"
+                  for i, sc in enumerate(analyse.scenarios)] or [f"   - {q}" for q in analyse.questions]
+        return ("1. Product Owner Agent — DEMANDE A PRECISER (aucun code genere)\n"
+                + ("   Manques : " + ", ".join(analyse.manques) + "\n" if analyse.manques else "")
+                + "\n".join(lignes) + "\n")
     user_stories = resultat.get("user_stories")
     if not user_stories:
         return "1. Product Owner Agent\n   (non atteint)\n"
     titres = [f"   - {us.titre} [{us.priorite}]" for us in user_stories.user_stories]
+    besoin = resultat.get("besoin")
+    origine = f"   Origine : {besoin.origine}\n" if besoin is not None and getattr(besoin, "origine", "") else ""
     return (
-        "1. Product Owner Agent — OK\n"
+        "1. Product Owner Agent — OK\n" + origine +
         f"   {len(user_stories.user_stories)} User Stories generees :\n"
         + "\n".join(titres) + "\n"
     )
@@ -275,6 +291,9 @@ def _ligne_titre(resultat) -> str:
         return f"⏳ EN COURS — derniere etape terminee : {LIBELLES_NOEUDS.get(noeud_en_cours, noeud_en_cours)}"
     if resultat["succes"]:
         return "✅ SUCCES — pipeline complet"
+    if resultat.get("demande_a_preciser"):
+        return ("❓ DEMANDE A PRECISER — le Product Owner a arrete le run avant tout developpement.\n"
+                "Cree un nouveau projet avec une demande plus precise (onglet « Nouveau projet »).")
     etape = resultat.get("etape", "?")
     if resultat.get("erreur"):
         return (
@@ -456,6 +475,10 @@ def lancer_pipeline_complet(titre, description, utilisateurs, fonctionnalites, s
         return
 
     besoin = collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure)
+    yield from _lancer(besoin, sections_choisies)
+
+
+def _lancer(besoin: BesoinUtilisateur, sections_choisies):
     run = _demarrer_run(executer_pipeline_en_direct(besoin))
     if run is None:
         yield _message_run_deja_en_cours()
@@ -576,7 +599,7 @@ def etats_des_etapes(resultat) -> list[tuple[str, str, str]]:
         valeur = resultat.get(cle)
         etat, detail = "attente", ""
         if noeud == plantage:
-            etat, detail = "ko", "plantage"
+            etat, detail = "ko", "a preciser" if resultat.get("demande_a_preciser") else "plantage"
         elif valeur is not None:
             etat = "ok"
             if noeud == "test_agent":
@@ -653,7 +676,7 @@ ETAPES_ECHEC_LISIBLES = {"backend": "QA Backend", "frontend": "QA Frontend", "do
                          "e2e (machine)": "Tests E2E (machine)"}
 COULEURS_STATUT = {"SUCCES": ("#ECFDF5", "#047857"), "ECHEC": ("#FEF2F2", "#B91C1C"),
                    "PLANTAGE": ("#FEF2F2", "#B91C1C"), "INTERROMPU": ("#FFF7ED", "#C2410C"),
-                   "EN COURS": ("#FFF7ED", "#C2410C")}
+                   "EN COURS": ("#FFF7ED", "#C2410C"), "A PRECISER": ("#FFFBEB", "#B45309")}
 MESSAGES_ETAPE = {
     "Product Owner": "Le Product Owner transforme la demande en user stories.",
     "Architect": "L'Architect choisit les technologies et l'organisation du code.",
@@ -785,6 +808,8 @@ def statut_du_run(resultat) -> str:
         return ""
     if resultat.get("_en_cours"):
         return "EN COURS"
+    if resultat.get("demande_a_preciser"):
+        return "A PRECISER"
     if resultat.get("erreur"):
         return "PLANTAGE"
     return "SUCCES" if resultat.get("succes") else "ECHEC"
@@ -797,6 +822,14 @@ def message_en_ce_moment(resultat) -> str:
     statut = statut_du_run(resultat)
     if statut == "SUCCES":
         return "Termine : l'application est prete dans output/ (backend, frontend, Docker et plan de test)."
+    if statut == "A PRECISER":
+        analyse = resultat["demande_a_preciser"]
+        if analyse.scenarios:
+            pistes = "plusieurs applications possibles : " + " ; ".join(sc.titre_projet for sc in analyse.scenarios)
+        else:
+            pistes = "questions du Product Owner : " + " ".join(analyse.questions)
+        return ("La demande est trop floue pour lancer le developpement (aucun code genere). "
+                f"{pistes[:1].upper() + pistes[1:]}. Cree un nouveau projet plus precis dans « Nouveau projet ».")
     if statut == "PLANTAGE":
         etape = LIBELLES_NOEUDS.get(resultat.get("etape"), resultat.get("etape"))
         return (f"{etape} a plante : {resultat.get('erreur')}. Regle le probleme, puis clique sur Relancer "
@@ -1262,7 +1295,7 @@ def _etat_pour_le_suivi(resultat):
         # Relance : on garde les etapes d'avant, et on efface de l'affichage
         # l'etape relancee et les suivantes (leur ancien resultat n'est plus valable).
         etat = dict(base, id_run=id_actif, _en_cours="demarrage")
-        for cle in ("erreur", "etape", "succes"):
+        for cle in ("erreur", "etape", "succes", "demande_a_preciser"):
             etat.pop(cle, None)
         noeuds = [noeud for noeud, _, _ in ETAPES_BARRE]
         if depart in noeuds:
@@ -1309,7 +1342,11 @@ def ajouter_a_la_file(titre, description, utilisateurs, fonctionnalites, structu
     erreur_validation = valider_besoin(titre, description, utilisateurs, fonctionnalites, structure)
     if erreur_validation:
         return alerte_depuis_texte(f"⚠️ Entree refusee : {erreur_validation}"), vue_file()
-    element = FILE.ajouter(collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure))
+    return _ajouter_besoin(collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure))
+
+
+def _ajouter_besoin(besoin: BesoinUtilisateur):
+    element = FILE.ajouter(besoin)
     position = sum(1 for e in FILE.copie() if e.statut in (EN_ATTENTE, EN_COURS))
     message = (f"✔ « {element.titre} » ajoute a la file (position {position}). "
                "Tu peux remplir un autre projet et l'ajouter aussi.")
@@ -1317,6 +1354,194 @@ def ajouter_a_la_file(titre, description, utilisateurs, fonctionnalites, structu
         message += " La file est en pause : voir « Run en cours »."
     return (f'<div style="border:1px solid #A7F3D0;background:#ECFDF5;color:#065F46;border-radius:10px;'
             f'padding:10px 14px;font-size:14px">{_e(message)}</div>'), vue_file()
+
+
+# --- Analyse de la demande avant le lancement (onglet « Nouveau projet ») ---
+# Lancer / Ajouter a la file : le Product Owner analyse d'abord la demande.
+# Claire : le run part (ou entre dans la file). Ambigue : il propose 2 ou 3 scenarios,
+# l'utilisateur en choisit un (il remplit le formulaire), le relit puis relance.
+# Trop vague, ou « Aucun ne me convient » : ses questions, l'utilisateur complete le formulaire.
+# Une demande floue n'entre donc jamais dans la file, et ne consomme aucun run.
+
+LETTRES = "ABC"
+STYLE_PANNEAU = "border-radius:12px;padding:12px 16px;margin-top:10px;font-size:14px;"
+
+
+def _champs(titre, description, utilisateurs, fonctionnalites, structure) -> list[str]:
+    return [(v or "").strip() for v in (titre, description, utilisateurs, fonctionnalites, structure)]
+
+
+def _origine(besoin: BesoinUtilisateur) -> str:
+    return (f"demande d'origine « {besoin.titre_projet} » : {besoin.description} ; utilisateurs : "
+            f"{besoin.utilisateurs_cibles} ; fonctionnalites : {', '.join(besoin.fonctionnalites_cles)}")
+
+
+def _panneau_attente() -> str:
+    return (f'<div style="{STYLE_PANNEAU}border:1px solid #FDBA74;background:#FFFBF5;color:#7C2D12">'
+            "⏳ Le Product Owner analyse ta demande avant de lancer le run (quelques secondes)...</div>")
+
+
+def _panneau_message(texte, fond="#FFFBEB", bord="#FCD34D", couleur="#78350F") -> str:
+    return (f'<div style="{STYLE_PANNEAU}border:1px solid {bord};background:{fond};color:{couleur}">'
+            f"{texte}</div>")
+
+
+def _liste(elements) -> str:
+    return "<ul style=\"margin:6px 0 0 18px\">" + "".join(f"<li>{_e(x)}</li>" for x in elements) + "</ul>"
+
+
+def panneau_scenarios(analyse: AnalyseDemande) -> str:
+    cartes = ""
+    for i, sc in enumerate(analyse.scenarios):
+        cartes += (
+            '<div style="border:1px solid #E5E7EB;border-radius:10px;padding:10px 14px;margin-top:8px;'
+            'background:#FFFFFF;color:#111827">'
+            f'<b>Scenario {LETTRES[i]} — {_e(sc.nom_court or sc.titre_projet)}</b>'
+            f'<div style="color:#6B7280;font-size:13px;margin-top:2px">{_e(sc.difference)}</div>'
+            f'<div style="margin-top:6px">{_e(sc.description)}</div>'
+            f'<div style="margin-top:4px;font-size:13px"><b>Pour :</b> {_e(sc.utilisateurs_cibles)}</div>'
+            f'<div style="font-size:13px"><b>Fonctionnalites :</b> {_e(", ".join(sc.fonctionnalites_cles))}</div>'
+            "</div>")
+    manques = f"<div style=\"margin-top:4px\">Ce qui manque : {_e(', '.join(analyse.manques))}.</div>" if analyse.manques else ""
+    return _panneau_message(
+        "<b>Ta demande peut se comprendre de plusieurs facons.</b> Aucun run n'est lance : choisis le scenario "
+        "le plus proche de ce que tu veux. Il remplira le formulaire, tu pourras le modifier avant de lancer."
+        f"{manques}{cartes}")
+
+
+INTRO_TROP_VAGUE = ("<b>Ta demande est trop vague pour lancer un run.</b> Sans plus de details, le Product Owner "
+                    "devrait inventer l'application, et le run produirait sans doute autre chose que ce que tu veux.")
+INTRO_AUCUN_SCENARIO = ("<b>Aucun scenario ne convient : decris plus precisement ce que tu veux.</b> "
+                        "Aucun run n'est lance.")
+
+
+def panneau_questions(analyse: AnalyseDemande, intro: str = INTRO_TROP_VAGUE) -> str:
+    manques = f"<div style=\"margin-top:6px\">Ce qui manque : {_e(', '.join(analyse.manques))}.</div>" if analyse.manques else ""
+    return _panneau_message(
+        intro +
+        f"{manques}<div style=\"margin-top:8px\">Complete le formulaire en repondant a ces questions, "
+        f"puis relance :</div>{_liste(analyse.questions or QUESTIONS_PAR_DEFAUT)}",
+        fond="#FEF2F2", bord="#FCA5A5", couleur="#7F1D1D")
+
+
+def _boutons_scenarios(analyse: AnalyseDemande | None) -> list:
+    """Mises a jour des 3 boutons de scenario puis du bouton « Aucun ne me convient »."""
+    scenarios = analyse.scenarios if analyse else []
+    boutons = [gr.update(visible=i < len(scenarios),
+                         value=f"Choisir {LETTRES[i]} : {scenarios[i].nom_court or scenarios[i].titre_projet}"
+                         if i < len(scenarios) else "")
+               for i in range(len(LETTRES))]
+    return boutons + [gr.update(visible=bool(scenarios))]
+
+
+def analyser_avant_lancement(titre, description, utilisateurs, fonctionnalites, structure, scenario_rempli):
+    """Decide si la demande peut partir. Renvoie (besoin pret a lancer ou None, panneau HTML,
+    analyse a garder pour les boutons ou None)."""
+    erreur_validation = valider_besoin(titre, description, utilisateurs, fonctionnalites, structure)
+    if erreur_validation:
+        return None, _panneau_message(f"⚠️ Entree refusee : {_e(erreur_validation)}"), None
+    besoin = collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure)
+    if not analyse_active():
+        return besoin, "", None
+    champs = _champs(titre, description, utilisateurs, fonctionnalites, structure)
+    # Scenario choisi et non modifie : deja analyse, on ne repaie pas l'analyse
+    if scenario_rempli and scenario_rempli.get("champs")[:4] == champs[:4]:
+        return besoin.model_copy(update={"demande_verifiee": True,
+                                         "origine": scenario_rempli["origine"]}), "", None
+    try:
+        analyse = analyser_demande(besoin)
+        verifiee = True
+    except Exception as e:  # Claude injoignable, limite du compte... : les regles seules jugent
+        logger.warning("Analyse de la demande impossible (%s : %s) : regles seules", type(e).__name__, e)
+        analyse, verifiee = analyse_par_les_regles(besoin), False
+    if analyse.clarte == "ambigue":
+        return None, panneau_scenarios(analyse), analyse
+    if analyse.clarte == "vague":
+        return None, panneau_questions(analyse), analyse
+    origine = ""
+    if scenario_rempli:
+        origine = scenario_rempli["origine"] + " ; scenario modifie ensuite par l'utilisateur"
+    # verifiee=False (Claude n'a pas repondu) : le pipeline refera l'analyse au debut du run
+    return besoin.model_copy(update={"demande_verifiee": verifiee, "origine": origine}), "", None
+
+
+def _preparer(action, titre, description, utilisateurs, fonctionnalites, structure, scenario_rempli):
+    """Premiere moitie des boutons « Lancer » et « Ajouter a la file ». Sorties : panneau,
+    analyse, besoin pret (dict ou None), scenario rempli, onglets, 3 boutons de scenario,
+    bouton « Aucun »."""
+    if action == "lancer" and run_en_cours() and not valider_besoin(
+            titre, description, utilisateurs, fonctionnalites, structure):
+        # Un run tourne deja : inutile de payer l'analyse, _lancer affichera le message habituel
+        besoin = collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure)
+        yield ("", None, besoin.model_dump(), gr.update(), gr.Tabs(selected="en_cours"),
+               *_boutons_scenarios(None))
+        return
+    yield _panneau_attente(), None, None, gr.update(), gr.update(), *_boutons_scenarios(None)
+    besoin, panneau, analyse = analyser_avant_lancement(
+        titre, description, utilisateurs, fonctionnalites, structure, scenario_rempli)
+    if besoin is not None:
+        # Demande acceptee : le scenario choisi est consomme
+        yield ("", None, besoin.model_dump(), None,
+               gr.Tabs(selected="en_cours") if action == "lancer" else gr.update(), *_boutons_scenarios(None))
+        return
+    etat_analyse = None
+    if analyse is not None:
+        # La demande d'origine accompagne l'analyse : elle sera notee dans le run si un scenario est choisi
+        etat_analyse = dict(analyse.model_dump(), _origine=_origine(
+            collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure)))
+    yield panneau, etat_analyse, None, gr.update(), gr.update(), *_boutons_scenarios(analyse)
+
+
+def preparer_lancement(titre, description, utilisateurs, fonctionnalites, structure, scenario_rempli):
+    yield from _preparer("lancer", titre, description, utilisateurs, fonctionnalites, structure, scenario_rempli)
+
+
+def preparer_ajout_file(titre, description, utilisateurs, fonctionnalites, structure, scenario_rempli):
+    yield from _preparer("file", titre, description, utilisateurs, fonctionnalites, structure, scenario_rempli)
+
+
+def lancer_si_pret(besoin_pret, sections_choisies):
+    """Seconde moitie de « Lancer » : demarre le run si l'analyse l'a accepte."""
+    if not besoin_pret:
+        yield tuple(gr.update() for _ in range(6))
+        return
+    yield from _lancer(BesoinUtilisateur(**besoin_pret), sections_choisies)
+
+
+def ajouter_si_pret(besoin_pret):
+    """Seconde moitie de « Ajouter a la file ». Sorties : message, vue de la file."""
+    if not besoin_pret:
+        return "", vue_file()
+    return _ajouter_besoin(BesoinUtilisateur(**besoin_pret))
+
+
+def choisir_scenario(numero, analyse_dict):
+    """Bouton « Choisir A/B/C » : le scenario remplit le formulaire. Sorties : titre, description,
+    utilisateurs, fonctionnalites, scenario rempli, panneau, 3 boutons, bouton « Aucun »."""
+    analyse = AnalyseDemande(**analyse_dict) if analyse_dict else None
+    if not analyse or numero >= len(analyse.scenarios):
+        return (*(gr.update() for _ in range(4)), None, "", *_boutons_scenarios(None))
+    sc: ScenarioDemande = analyse.scenarios[numero]
+    fonctionnalites = ", ".join(f.replace(",", " ") for f in sc.fonctionnalites_cles)
+    champs = [sc.titre_projet, sc.description, sc.utilisateurs_cibles, fonctionnalites]
+    origine = (f"scenario {LETTRES[numero]} choisi parmi {len(analyse.scenarios)} proposes par le Product Owner"
+               f" ({_origine_courte(analyse_dict)})")
+    panneau = _panneau_message(
+        f"✔ Scenario {LETTRES[numero]} rempli dans le formulaire. Relis-le, modifie-le si besoin, "
+        "puis clique sur « Lancer le pipeline » ou « Ajouter a la file d'attente ».",
+        fond="#ECFDF5", bord="#A7F3D0", couleur="#065F46")
+    return (*champs, {"champs": champs, "origine": origine}, panneau, *_boutons_scenarios(None))
+
+
+def _origine_courte(analyse_dict) -> str:
+    return analyse_dict.get("_origine", "") or "demande d'origine non conservee"
+
+
+def aucun_scenario(analyse_dict):
+    """« Aucun ne me convient » : les questions du PO. Sorties : panneau, scenario rempli, boutons."""
+    analyse = AnalyseDemande(**analyse_dict) if analyse_dict else AnalyseDemande(clarte="vague")
+    return (panneau_questions(analyse, INTRO_AUCUN_SCENARIO),
+            None, *_boutons_scenarios(None))
 
 
 def reprendre_la_file():
@@ -1413,6 +1638,11 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
                 bouton_lancer = gr.Button("Lancer le pipeline", variant="primary")
                 bouton_ajouter_file = gr.Button("Ajouter a la file d'attente")
             message_file = gr.HTML()
+            # Analyse de la demande par le Product Owner : scenarios ou questions
+            panneau_analyse = gr.HTML()
+            with gr.Row():
+                boutons_scenario = [gr.Button(visible=False, size="sm") for _ in LETTRES]
+            bouton_aucun = gr.Button("Aucun ne me convient", visible=False, size="sm", variant="secondary")
 
         with gr.Tab("Run en cours", id="en_cours") as onglet_en_cours:
             alerte = gr.HTML()
@@ -1465,17 +1695,30 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
     user_stories_json = gr.Code(language="json", visible=False)
     resultat_state = gr.State(None)
     sorties_run = [resultat_texte, user_stories_json, resultat_state, bouton_lancer, bouton_relancer, id_run]
+    analyse_state = gr.State(None)     # derniere analyse non claire (pour les boutons de scenario)
+    besoin_pret = gr.State(None)       # demande acceptee par l'analyse, a lancer ou a mettre en file
+    scenario_rempli = gr.State(None)   # scenario choisi : champs remplis et trace pour le rapport
+    champs_formulaire = [titre, description, utilisateurs, fonctionnalites, structure]
+    sorties_analyse = [panneau_analyse, analyse_state, besoin_pret, scenario_rempli, onglets,
+                       *boutons_scenario, bouton_aucun]
 
     # concurrency_limit=None : ces fonctions ne font que suivre un run qui tourne
     # dans son propre thread ; un suivi abandonne (page deconnectee) ne doit pas
     # bloquer les suivants. _demarrer_run empeche deux runs en parallele.
+    # « Lancer » : le Product Owner analyse d'abord la demande ; le run ne part (et l'onglet
+    # « Run en cours » ne s'ouvre) que si elle est claire ou si un scenario a ete choisi
     bouton_lancer.click(
-        fn=lancer_pipeline_complet,
-        js=JS_ALLER_AU_RUN_EN_COURS,  # ouvre l'onglet « Run en cours »
-        inputs=[titre, description, utilisateurs, fonctionnalites, structure, sections_choisies],
-        outputs=sorties_run,
+        fn=preparer_lancement, inputs=[*champs_formulaire, scenario_rempli], outputs=sorties_analyse,
+    ).then(
+        fn=lancer_si_pret, inputs=[besoin_pret, sections_choisies], outputs=sorties_run,
         concurrency_limit=None,
     )
+    for numero, bouton in enumerate(boutons_scenario):
+        bouton.click(fn=functools.partial(choisir_scenario, numero), inputs=analyse_state,
+                     outputs=[*champs_formulaire[:4], scenario_rempli, panneau_analyse,
+                              *boutons_scenario, bouton_aucun])
+    bouton_aucun.click(fn=aucun_scenario, inputs=analyse_state,
+                       outputs=[panneau_analyse, scenario_rempli, *boutons_scenario, bouton_aucun])
     bouton_relancer.click(
         fn=relancer_pipeline,
         js=JS_ALLER_AU_RUN_EN_COURS,  # ouvre l'onglet « Run en cours »
@@ -1500,9 +1743,9 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
     minuteur.tick(fn=rafraichir_suivi, inputs=resultat_state, outputs=[suivi, onglet_en_cours])
     minuteur.tick(fn=rafraichir_file, inputs=echecs_affiches, outputs=[bloc_file, liste_echecs, echecs_affiches])
     # File d'attente
-    bouton_ajouter_file.click(fn=ajouter_a_la_file,
-                              inputs=[titre, description, utilisateurs, fonctionnalites, structure],
-                              outputs=[message_file, bloc_file])
+    bouton_ajouter_file.click(
+        fn=preparer_ajout_file, inputs=[*champs_formulaire, scenario_rempli], outputs=sorties_analyse,
+    ).then(fn=ajouter_si_pret, inputs=besoin_pret, outputs=[message_file, bloc_file])
     bouton_reprendre_file.click(fn=reprendre_la_file, outputs=bloc_file)
     bouton_pause_file.click(fn=mettre_la_file_en_pause, outputs=bloc_file)
     bouton_vider_file.click(fn=vider_la_file, outputs=bloc_file)

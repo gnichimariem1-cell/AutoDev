@@ -11,7 +11,7 @@ from typing import TypedDict
 from src.common.schemas import (
     BesoinUtilisateur, SortiePO, SortieArchitecte, SortieDev, RapportQA,
     SortieFrontend, RapportQAFrontend, SortieDockerization, RapportValidationDocker,
-    SortieTestAgent, SortieAgentE2E, RapportE2E,
+    SortieTestAgent, SortieAgentE2E, RapportE2E, AnalyseDemande,
 )
 
 MAX_TENTATIVES = int(os.environ.get("MAX_TENTATIVES", 3))
@@ -24,6 +24,10 @@ class EtatPipeline(TypedDict, total=False):
     dossier_backend: str
     dossier_frontend: str
     dossier_docker: str
+
+    # Demande jugee floue par le Product Owner au debut du run : le run s'arrete
+    # (etape "po", message dans "erreur") avec ses questions ou ses scenarios
+    demande_a_preciser: AnalyseDemande
 
     # Sorties des agents
     user_stories: SortiePO

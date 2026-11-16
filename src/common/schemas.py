@@ -8,6 +8,31 @@ class BesoinUtilisateur(BaseModel):
     utilisateurs_cibles: str
     fonctionnalites_cles: list[str]
     structure_projet: str = ""
+    # True : le Product Owner a juge la demande claire avant le lancement (ou l'utilisateur
+    # a choisi un de ses scenarios) ; le pipeline ne la reverifie pas
+    demande_verifiee: bool = False
+    # Trace pour le rapport : demande d'origine et scenario choisi, vide sinon
+    origine: str = ""
+
+# Champs de BesoinUtilisateur propres a AutoDev, jamais envoyes aux agents
+CHAMPS_SUIVI_BESOIN = {"demande_verifiee", "origine"}
+
+
+class ScenarioDemande(BaseModel):
+    """Une interpretation precise d'une demande ambigue, proposee par le Product Owner"""
+    titre_projet: str
+    description: str
+    utilisateurs_cibles: str
+    fonctionnalites_cles: list[str]
+    difference: str = ""  # en une phrase : ce qui distingue ce scenario des autres
+    nom_court: str = ""   # 2 a 4 mots qui le distinguent des autres (boutons du formulaire)
+
+class AnalyseDemande(BaseModel):
+    """Analyse de la demande par le Product Owner, avant le lancement du run"""
+    clarte: Literal["claire", "ambigue", "vague"]
+    manques: list[str] = []
+    questions: list[str] = []
+    scenarios: list[ScenarioDemande] = []
 
 class UserStory(BaseModel):
     id: str

@@ -58,6 +58,8 @@ def cause_de_l_arret(etat: dict, exception: Exception | None = None) -> str:
         return "machine"  # le run n'a meme pas pu aller au bout du graphe
     if etat.get("succes"):
         return "succes"
+    if etat.get("demande_a_preciser"):
+        return "projet"  # la demande est a reformuler, rien a regler sur la machine
     for cle in ("rapport_validation_docker", "rapport_e2e"):
         rapport = etat.get(cle)
         if rapport is not None and getattr(rapport, "erreur_environnement", False):

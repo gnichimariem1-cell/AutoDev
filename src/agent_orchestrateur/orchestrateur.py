@@ -270,7 +270,9 @@ def historique_runs(limite: int = 30) -> list[dict]:
         valeurs = snapshot.values or {}
         if not valeurs:
             continue
-        if valeurs.get("erreur"):
+        if valeurs.get("demande_a_preciser"):
+            statut, etape = "A PRECISER", "po"
+        elif valeurs.get("erreur"):
             statut, etape = "PLANTAGE", valeurs.get("etape", "")
         elif snapshot.next:
             statut, etape = "INTERROMPU", snapshot.next[0]

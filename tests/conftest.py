@@ -12,6 +12,8 @@ os.environ.setdefault("ATTENTE_RELANCE", "0")
 os.environ.setdefault("LOG_FICHIER", "")
 # La file d'attente des tests reste en memoire (pas de checkpoints/file_attente.json)
 os.environ.setdefault("FILE_ATTENTE_JSON", "")
+# Pas d'analyse de la demande par Claude dans les tests (tests/test_analyse_demande.py l'active)
+os.environ.setdefault("ANALYSE_DEMANDE", "0")
 from tests import sorties  # noqa: E402
 
 SORTIES_PAR_DEFAUT = {

@@ -6,7 +6,7 @@ import unicodedata
 import shutil
 import subprocess
 import requests
-from src.common.schemas import BesoinUtilisateur, SortiePO, UserStory
+from src.common.schemas import BesoinUtilisateur, SortiePO, UserStory, CHAMPS_SUIVI_BESOIN
 from src.common.regles import bloc_regles
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")
@@ -195,7 +195,7 @@ def _completer(sortie: SortiePO, manquantes: list[str]) -> SortiePO:
 
 
 def generer_user_stories(besoin: BesoinUtilisateur) -> SortiePO:
-    prompt = PROMPT_TEMPLATE.format(besoin_json=besoin.model_dump_json(indent=2)) + bloc_regles("product_owner")
+    prompt = PROMPT_TEMPLATE.format(besoin_json=besoin.model_dump_json(indent=2, exclude=CHAMPS_SUIVI_BESOIN)) + bloc_regles("product_owner")
     sortie = _demander(prompt)
 
     manquantes = fonctionnalites_manquantes(besoin.fonctionnalites_cles, sortie)

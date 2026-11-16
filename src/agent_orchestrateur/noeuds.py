@@ -19,6 +19,7 @@ import requests
 
 from src.common.logging_config import configurer_logging
 from src.agent_po.product_owner import generer_user_stories
+from src.agent_po.analyse_demande import analyse_active, analyser_demande, resume_pour_le_journal
 from src.agent_architect.architect import generer_architecture
 from src.agent_dev.developer import generer_code, appliquer_corrections
 from src.agent_test.testeur import generer_plan_et_tests, reviser_tests, lire_tests, restaurer_tests
@@ -88,6 +89,17 @@ def _proteger(nom_noeud: str, relancer_timeout: bool = True):
 
 @_proteger("po")
 def noeud_po(etat: EtatPipeline) -> dict:
+    besoin = etat["besoin"]
+    # Garde-fou : une demande qui n'a pas ete analysee avant le lancement (Relancer d'un
+    # ancien run, projet ajoute a la file avant l'analyse) est verifiee ici. Si elle est
+    # floue, le run s'arrete apres ce seul appel, sans generer de code.
+    if not besoin.demande_verifiee and analyse_active():
+        logger.info("[1/9] Product Owner Agent : analyse de la demande")
+        analyse = analyser_demande(besoin)
+        logger.info("[1/9] Product Owner Agent : %s", resume_pour_le_journal(analyse))
+        if analyse.clarte != "claire":
+            return {"demande_a_preciser": analyse, "etape": "po",
+                    "erreur": "Demande a preciser : " + resume_pour_le_journal(analyse)}
     logger.info("[1/9] Product Owner Agent : demarrage")
     user_stories = generer_user_stories(etat["besoin"])
     logger.info("[1/9] Product Owner Agent : OK (%d User Stories)", len(user_stories.user_stories))
@@ -374,7 +386,9 @@ _RAPPORTS_PAR_ETAPE = {
 
 def noeud_echec(etat: EtatPipeline) -> dict:
     etape = etat["etape"]
-    if etat.get("erreur"):
+    if etat.get("demande_a_preciser"):
+        logger.warning("Run arrete : %s", etat["erreur"])
+    elif etat.get("erreur"):
         logger.error("PLANTAGE de l'etape %s — %s", etape, etat["erreur"])
     else:
         cle_rapport, cle_tentative = _RAPPORTS_PAR_ETAPE[etape]

@@ -33,6 +33,14 @@ Chaque run passe par 11 étapes. L'orchestrateur transmet le travail d'un agent 
 | 10 | Agent E2E | Claude Code | Écrit des scénarios de bout en bout : l'API (httpx) et les pages dans un navigateur (Playwright) |
 | 11 | Tests E2E | Docker + pytest + Chromium (sans IA) | Démarre l'application et joue les scénarios comme un vrai utilisateur |
 
+**Avant le run : analyse de la demande.** Quand on clique sur « Lancer » ou « Ajouter à la file d'attente », le Product Owner (Claude, quelques secondes) vérifie d'abord que la demande dit clairement quoi construire. Des règles simples (description très courte, mots fourre-tout, moins de deux fonctionnalités concrètes) l'empêchent d'être trop indulgent :
+
+- **claire** : le run part, ou le projet entre dans la file ;
+- **ambiguë** : aucun run n'est lancé ; le PO propose 2 ou 3 scénarios complets. En choisir un remplit le formulaire, qu'on relit, modifie si besoin, puis lance. Le run garde la trace de la demande d'origine et du scénario choisi ;
+- **trop vague**, ou « Aucun ne me convient » : aucun run, le PO pose ses questions et l'on complète le formulaire.
+
+Une demande floue n'entre donc jamais dans la file et ne consomme aucun run. Si une demande non analysée arrive quand même au pipeline (**Relancer** d'un ancien run, projet mis en file avant cette analyse), le PO la vérifie au début du run et l'arrête au statut **A PRECISER** si elle est floue, après ce seul appel. `ANALYSE_DEMANDE=0` désactive l'analyse.
+
 **Boucles de correction** (`MAX_TENTATIVES`, 3 par défaut) :
 
 ```
@@ -103,6 +111,7 @@ Puis remplir `.env`. Ce fichier contient des secrets : il n'est jamais versionn�
 | `CHECKPOINT_DB` | Fichier de sauvegarde des runs |
 | `ESSAIS_AGENT`, `ATTENTE_RELANCE` | Relance automatique d'un agent après une erreur passagère |
 | `PO_MOTEUR` | Moteur du Product Owner : `ollama` (local) ou `claude` |
+| `ANALYSE_DEMANDE`, `ANALYSE_MODELE`, `ANALYSE_TIMEOUT` | Analyse de la demande avant le run (1 = activée), modèle Claude utilisé (vide = celui par défaut), délai (secondes) |
 | `E2E_ACTIF`, `E2E_TIMEOUT` | Tests de bout en bout (1 = activés) et leur durée maximale (secondes) |
 
 Après une modification de `.env`, recréer le conteneur : `docker compose up -d --force-recreate`.

@@ -147,3 +147,62 @@ import pytest
 def _po_moteur_ollama_par_defaut(monkeypatch):
     """Les tests ne dependent pas du .env du poste : Ollama par defaut."""
     monkeypatch.setenv("PO_MOTEUR", "ollama")
+
+
+# --- Reponse incomplete : synonymes compris, sinon un nouvel essai (Stock du labo) ---
+
+def _reponse_claude(stories):
+    return MagicMock(returncode=0, stdout=json.dumps({"user_stories": stories}), stderr="")
+
+
+BESOIN_STOCK = BesoinUtilisateur(titre_projet="Stock", description="d", utilisateurs_cibles="u",
+                                 fonctionnalites_cles=["sortie de stock"])
+
+
+def test_priorite_sous_un_autre_nom_ou_en_moscow(monkeypatch):
+    monkeypatch.setenv("PO_MOTEUR", "claude")
+    stories = [{"id": "US1", "titre": "Sortie de stock", "description": "d", "criteres_acceptation": ["c"],
+                "moscow": "Must"},
+               {"id": "US2", "titre": "Export", "description": "d", "criteres_acceptation": ["c"],
+                "priorité": "Could have"},
+               {"id": "US3", "titre": "Alerte", "description": "d", "criteres_acceptation": ["c"],
+                "priority": "Medium"}]
+    with patch("src.agent_po.product_owner.subprocess.run", return_value=_reponse_claude(stories)) as claude:
+        sortie = generer_user_stories(BESOIN_STOCK)
+    assert claude.call_count == 1
+    assert [us.priorite for us in sortie.user_stories] == ["haute", "basse", "moyenne"]
+
+
+def test_priorite_absente_redemandee_une_fois(monkeypatch):
+    monkeypatch.setenv("PO_MOTEUR", "claude")
+    sans = [{"id": "US1", "titre": "Sortie de stock", "description": "d", "criteres_acceptation": ["c"]}]
+    avec = [dict(sans[0], priorite="haute")]
+    with patch("src.agent_po.product_owner.subprocess.run",
+               side_effect=[_reponse_claude(sans), _reponse_claude(avec)]) as claude:
+        sortie = generer_user_stories(BESOIN_STOCK)
+    assert claude.call_count == 2 and sortie.user_stories[0].priorite == "haute"
+    deuxieme = claude.call_args_list[1].kwargs["input"]
+    assert "user_stories.0.priorite : Field required" in deuxieme and "exactement les 5 champs" in deuxieme
+
+
+def test_toujours_incomplete_apres_le_nouvel_essai(monkeypatch):
+    import pytest
+    from src.agent_po.product_owner import ReponseInvalide
+    monkeypatch.setenv("PO_MOTEUR", "claude")
+    sans = [{"id": "US1", "titre": "t", "description": "d", "criteres_acceptation": ["c"]}]
+    with patch("src.agent_po.product_owner.subprocess.run",
+               side_effect=[_reponse_claude(sans), _reponse_claude(sans)]) as claude, \
+            pytest.raises(ReponseInvalide, match="priorite"):
+        generer_user_stories(BESOIN_STOCK)
+    assert claude.call_count == 2  # pas de boucle infinie
+
+
+def test_erreur_du_moteur_pas_redemandee(monkeypatch):
+    """Limite du compte ou connexion : aucun nouvel essai, l'erreur remonte telle quelle."""
+    import pytest
+    monkeypatch.setenv("PO_MOTEUR", "claude")
+    limite = MagicMock(returncode=1, stdout="You've hit your 5-hour limit · resets 6:40pm (UTC)", stderr="")
+    with patch("src.agent_po.product_owner.subprocess.run", return_value=limite) as claude, \
+            pytest.raises(RuntimeError, match="5-hour limit"):
+        generer_user_stories(BESOIN_STOCK)
+    assert claude.call_count == 1

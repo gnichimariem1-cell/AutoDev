@@ -16,3 +16,9 @@
 
 - **Des criteres d'acceptation verifiables : un resultat precis (texte, code, valeur), pas « fonctionne bien ».**
   Pourquoi : le Test Agent écrit ses tests à partir de ces critères.
+
+- **Chaque user story a exactement les 5 champs "id", "titre", "description", "criteres_acceptation" et "priorite" ; "priorite" vaut "haute", "moyenne" ou "basse" (pas « Must », pas « moscow »).**
+  Pourquoi : une user story sans priorité est refusée, et tout le run s'arrête au Product Owner.
+  Origine : Stock du labo, les 12 user stories sans champ « priorite » (deux runs arrêtés).
+  Contrôle : AutoDev comprend les synonymes (priority, moscow, Must, High…) et redemande une fois
+  une réponse incomplète en disant ce qui manque.

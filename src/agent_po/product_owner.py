@@ -6,8 +6,12 @@ import unicodedata
 import shutil
 import subprocess
 import requests
+from pydantic import ValidationError
 from src.common.schemas import BesoinUtilisateur, SortiePO, UserStory, CHAMPS_SUIVI_BESOIN
 from src.common.regles import bloc_regles
+from src.common.logging_config import configurer_logging
+
+logger = configurer_logging()
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")
 MODEL = os.environ.get("OLLAMA_MODEL", "qwen3")
@@ -40,6 +44,23 @@ def _cle_simplifiee(texte: str) -> str:
 
 
 CHAMPS_SIMPLIFIES = {_cle_simplifiee(c): c for c in CHAMPS_ATTENDUS}
+# Autres noms que le modele donne parfois a la priorite (ex : Stock du labo, « moscow »)
+CHAMPS_SIMPLIFIES.update({cle: "priorite" for cle in (
+    "priority", "importance", "moscow", "prio", "niveau", "niveaudepriorite", "prioritemoscow", "methodemoscow")})
+
+# Valeurs de priorite acceptees, ramenees a haute / moyenne / basse (MoSCoW compris)
+VALEURS_PRIORITE = {
+    "haute": "haute", "high": "haute", "must": "haute", "musthave": "haute", "indispensable": "haute",
+    "critique": "haute", "elevee": "haute", "forte": "haute", "essentielle": "haute",
+    "moyenne": "moyenne", "medium": "moyenne", "should": "moyenne", "shouldhave": "moyenne",
+    "normale": "moyenne", "importante": "moyenne",
+    "basse": "basse", "low": "basse", "could": "basse", "couldhave": "basse", "wont": "basse",
+    "wonthave": "basse", "faible": "basse", "confort": "basse", "optionnelle": "basse",
+}
+
+
+class ReponseInvalide(RuntimeError):
+    """Reponse du modele inutilisable (JSON invalide ou champs manquants) : on peut la redemander."""
 
 
 def _normaliser_cles(obj):
@@ -61,6 +82,29 @@ def _normaliser_cles(obj):
     if isinstance(obj, list):
         return [_normaliser_cles(item) for item in obj]
     return obj
+
+
+def _normaliser_priorites(donnees):
+    """« Must », « High », « Haute » -> « haute » (idem moyenne, basse)."""
+    if isinstance(donnees, dict):
+        for story in donnees.get("user_stories", []) or []:
+            if isinstance(story, dict) and isinstance(story.get("priorite"), str):
+                story["priorite"] = VALEURS_PRIORITE.get(_cle_simplifiee(story["priorite"]), story["priorite"])
+    return donnees
+
+
+def _resume_erreur(erreur: ValidationError) -> str:
+    """Les premieres erreurs, lisibles : « user_stories.0.priorite : Field required »."""
+    lignes = [f"{'.'.join(str(x) for x in e['loc'])} : {e['msg']}" for e in erreur.errors()[:5]]
+    reste = len(erreur.errors()) - len(lignes)
+    return "; ".join(lignes) + (f" (et {reste} autres)" if reste > 0 else "")
+
+
+def _valider(donnees_brutes) -> SortiePO:
+    try:
+        return SortiePO.model_validate(_normaliser_priorites(_normaliser_cles(donnees_brutes)))
+    except ValidationError as e:
+        raise ReponseInvalide(f"reponse incomplete : {_resume_erreur(e)}") from e
 
 
 def _demander_ollama(prompt: str) -> SortiePO:
@@ -88,14 +132,12 @@ def _demander_ollama(prompt: str) -> SortiePO:
     try:
         donnees_brutes = json.loads(contenu)
     except json.JSONDecodeError as e:
-        raise RuntimeError(
+        raise ReponseInvalide(
             f"Ollama n'a pas retourné un JSON valide.\n"
             f"Contenu reçu (200 premiers caracteres) : {contenu[:200]!r}\n"
             f"Erreur : {e}"
         )
-
-    donnees_normalisees = _normaliser_cles(donnees_brutes)
-    return SortiePO.model_validate(donnees_normalisees)
+    return _valider(donnees_brutes)
 
 
 def _extraire_json(texte: str) -> str:
@@ -118,12 +160,12 @@ def _demander_claude(prompt: str) -> SortiePO:
     try:
         donnees_brutes = json.loads(contenu)
     except json.JSONDecodeError as e:
-        raise RuntimeError(
+        raise ReponseInvalide(
             f"Claude n'a pas retourné un JSON valide.\n"
             f"Contenu reçu (200 premiers caracteres) : {contenu[:200]!r}\n"
             f"Erreur : {e}"
         )
-    return SortiePO.model_validate(_normaliser_cles(donnees_brutes))
+    return _valider(donnees_brutes)
 
 
 def moteur_po() -> str:
@@ -132,11 +174,30 @@ def moteur_po() -> str:
     return moteur if moteur in ("ollama", "claude") else "ollama"
 
 
-def _demander(prompt: str) -> SortiePO:
-    """Envoie la consigne au moteur choisi (Ollama ou Claude)."""
+def _demander_une_fois(prompt: str) -> SortiePO:
     if moteur_po() == "claude":
         return _demander_claude(prompt)
     return _demander_ollama(prompt)
+
+
+CONSIGNE_CORRECTION = """
+
+ATTENTION : ta reponse precedente etait inutilisable ({erreur}).
+Reponds a nouveau avec le JSON complet. CHAQUE user story doit avoir exactement les 5 champs
+"id", "titre", "description", "criteres_acceptation" et "priorite", et "priorite" vaut
+"haute", "moyenne" ou "basse" (pas d'autre nom de champ, pas d'autre valeur).
+"""
+
+
+def _demander(prompt: str) -> SortiePO:
+    """Envoie la consigne au moteur choisi (Ollama ou Claude). Une reponse inutilisable
+    (JSON invalide, champ manquant) est redemandee UNE fois en disant ce qui n'allait pas.
+    Une erreur du moteur lui-meme (connexion, limite du compte) n'est pas redemandee."""
+    try:
+        return _demander_une_fois(prompt)
+    except ReponseInvalide as e:
+        logger.warning("[PO] reponse inutilisable, nouvel essai : %s", str(e)[:300])
+        return _demander_une_fois(prompt + CONSIGNE_CORRECTION.format(erreur=str(e)[:600]))
 
 
 # --- Verification : chaque fonctionnalite du formulaire a sa user story ---

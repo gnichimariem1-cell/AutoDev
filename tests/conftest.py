@@ -16,6 +16,15 @@ os.environ.setdefault("FILE_ATTENTE_JSON", "")
 os.environ.setdefault("ANALYSE_DEMANDE", "0")
 from tests import sorties  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _environnement_des_tests(monkeypatch):
+    """Les tests ne dependent pas du .env de la machine : le conteneur AutoDev le charge
+    (ex : PO_MOTEUR=claude faisait appeler le vrai Claude au lieu du faux Ollama).
+    Un test qui veut une autre valeur la change lui-meme (monkeypatch.setenv)."""
+    monkeypatch.setenv("PO_MOTEUR", "ollama")
+    monkeypatch.setenv("ANALYSE_DEMANDE", "0")
+
 SORTIES_PAR_DEFAUT = {
     "generer_user_stories": sorties.USER_STORIES,
     "generer_architecture": sorties.ARCHITECTURE,

@@ -1,9 +1,11 @@
 FROM python:3.11-slim
 
 # nodejs/npm : requis pour installer le CLI Claude Code (agent Developer)
+# libatomic1 : requis par le Node.js fourni avec Playwright (playwright install)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \
     npm \
+    libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @anthropic-ai/claude-code

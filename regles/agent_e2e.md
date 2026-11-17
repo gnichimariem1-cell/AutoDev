@@ -19,6 +19,7 @@
   Origine : GenieLab Hub, seulement 5 captures pour toute l'application.
 
 - **Dans chaque scenario d'interface, appelle etape("nom_court") apres chaque action importante : page ouverte, formulaire rempli, apres le clic, resultat affiche (2 a 5 etapes par scenario). Ajoute la fixture etape aux parametres du test : def test_E21_connexion(page: Page, front_url, etape).**
+- **Quand une etape prouve un resultat (message, ligne du tableau, classement, erreur), passe cet element en second argument : etape("stock_insuffisant", page.get_by_text("Stock insuffisant")). Il est amene a l'ecran avant la capture : l'image doit montrer ce que le nom annonce, pas le haut de la page.**
   Pourquoi : on suit le scénario image par image, sans regarder la vidéo ; en cas d'échec, on voit
   la dernière étape réussie.
   Origine : GenieLab Hub, une seule capture (la fin) par scénario.

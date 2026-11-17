@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+﻿from pydantic import BaseModel, Field
 from typing import Literal
 
 class BesoinUtilisateur(BaseModel):
@@ -58,7 +58,8 @@ class CasDeTest(BaseModel):
     scenario: str
     methode: str
     route: str
-    code_attendu: int
+    # Un code HTTP (201), plusieurs codes possibles ("201/409"), ou rien ("-")
+    code_attendu: int | str | None = None
     resultat_attendu: str
     priorite: str = "haute"
 

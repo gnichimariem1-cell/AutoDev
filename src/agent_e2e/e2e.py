@@ -151,7 +151,10 @@ def etape(request):
     trouve = re.search(r"test_(E\\d+)", request.node.name)
     numero = [0]
 
-    def capturer(nom):
+    def capturer(nom, element=None):
+        """element : ce que l'etape prouve (ex : page.get_by_text("Stock insuffisant")).
+        Il est amene a l'ecran avant la capture ; sans element, toute la page est capturee
+        (sinon l'image montrerait le haut de la page, pas la zone verifiee)."""
         if not dossier:
             return
         page = request.getfixturevalue("page")
@@ -159,7 +162,16 @@ def etape(request):
         propre = re.sub(r"[^a-zA-Z0-9_-]+", "_", nom).strip("_")[:40] or "etape"
         cible = Path(dossier) / (trouve.group(1) if trouve else request.node.name)
         cible.mkdir(parents=True, exist_ok=True)
-        page.screenshot(path=str(cible / f"{numero[0]:02d}-{propre}.png"))
+        fichier = str(cible / f"{numero[0]:02d}-{propre}.png")
+        if element is not None:
+            try:
+                element = element.first if hasattr(element, "first") else element
+                element.scroll_into_view_if_needed(timeout=3000)
+                page.screenshot(path=fichier)
+                return
+            except Exception:
+                pass  # element introuvable : on garde au moins toute la page
+        page.screenshot(path=fichier, full_page=True)
     return capturer
 
 
@@ -234,7 +246,9 @@ Code de l'application, a LIRE d'abord :
 - frontend dans {dossier_frontend}/ : pages HTML et JavaScript (champs, boutons, textes affiches, pages).
 Le fichier {dossier}/conftest.py est deja ecrit : lis-le. Il fournit les fixtures `api_url`, `front_url`,
 `nouvel_email()` (adresse unique), `variables_app` (variables du .env de l'application, par exemple un
-mot de passe administrateur), `etape("nom")` (capture d'ecran a une etape cle d'un scenario d'interface)
+mot de passe administrateur), `etape("nom", element)` (capture d'ecran a une etape cle d'un scenario d'interface ; passe en
+`element` ce que l'etape prouve, ex : `etape("stock_insuffisant", page.get_by_text("Stock insuffisant"))`,
+pour qu'il soit visible sur l'image)
 et `page` (navigateur Chromium, fourni par pytest-playwright).
 
 Ecris EXACTEMENT deux fichiers, dans {dossier}/ uniquement :

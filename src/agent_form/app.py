@@ -2,6 +2,7 @@ import functools
 import html
 import os
 import re
+import tempfile
 import threading
 import time
 
@@ -24,10 +25,10 @@ from src.agent_orchestrateur.etat import MAX_TENTATIVES
 from src.agent_orchestrateur.orchestrateur import (
     executer_pipeline_en_direct, reprendre_pipeline_en_direct, point_de_reprise, RepriseImpossible,
     rejouer_pipeline_en_direct, point_de_rejeu, ETAPES_REJOUABLES,
-    historique_runs, etat_du_run, FICHIER_ID_RUN,
+    historique_runs, etat_du_run, FICHIER_ID_RUN, etapes_non_effectuees, DOSSIER_ARCHIVES,
 )
 from src.agent_orchestrateur.file_attente import (
-    FileAttente, chemin_par_defaut, conseil, EN_ATTENTE, EN_COURS, TERMINE, ECHEC, ARRETE_MACHINE, REMIS,
+    FileAttente, ProjetDejaDansLaFile, meme_projet, chemin_par_defaut, conseil, EN_ATTENTE, EN_COURS, TERMINE, ECHEC, ARRETE_MACHINE, REMIS,
 )
 
 logger = configurer_logging()
@@ -289,6 +290,8 @@ def _ligne_titre(resultat) -> str:
         return f"⏳ ARRET EN COURS — plantage de : {LIBELLES_NOEUDS.get(noeud_en_cours, noeud_en_cours)}"
     if noeud_en_cours:
         return f"⏳ EN COURS — derniere etape terminee : {LIBELLES_NOEUDS.get(noeud_en_cours, noeud_en_cours)}"
+    if resultat["succes"] and etapes_non_effectuees(resultat):
+        return "⚠️ SUCCES PARTIEL — Validation Docker et tests E2E non effectues : Docker n'etait pas joignable"
     if resultat["succes"]:
         return "✅ SUCCES — pipeline complet"
     if resultat.get("demande_a_preciser"):
@@ -355,8 +358,9 @@ class RunEnArrierePlan:
     arrive cote navigateur ; la page ne fait que suivre les evenements, et peut
     s'y rattacher apres un rechargement (suivre_run_actif)."""
 
-    def __init__(self, evenements, id_run=""):
+    def __init__(self, evenements, id_run="", titre=""):
         self.id_run = id_run
+        self.titre = titre
         self.evenements = []  # (noeud termine, etat) dans l'ordre
         self.termine = False
         self.exception = None
@@ -393,19 +397,19 @@ _run_actif: RunEnArrierePlan | None = None
 _verrou_run = threading.Lock()
 
 
-def _demarrer_run(evenements, id_run="") -> RunEnArrierePlan | None:
+def _demarrer_run(evenements, id_run="", titre="") -> RunEnArrierePlan | None:
     """Demarre un run en arriere-plan, sauf si un autre est encore en cours
     (deux runs en parallele ecriraient dans le meme dossier output/)."""
     global _run_actif
     with _verrou_run:
         if _run_actif and not _run_actif.termine:
             return None
-        _run_actif = RunEnArrierePlan(evenements, id_run)
+        _run_actif = RunEnArrierePlan(evenements, id_run, titre)
         return _run_actif
 
 
 def _nouveau_run_de_la_file(besoin):
-    return _demarrer_run(executer_pipeline_en_direct(besoin))
+    return _demarrer_run(executer_pipeline_en_direct(besoin), titre=besoin.titre_projet)
 
 
 def _reprise_de_la_file(id_run):
@@ -479,7 +483,7 @@ def lancer_pipeline_complet(titre, description, utilisateurs, fonctionnalites, s
 
 
 def _lancer(besoin: BesoinUtilisateur, sections_choisies):
-    run = _demarrer_run(executer_pipeline_en_direct(besoin))
+    run = _demarrer_run(executer_pipeline_en_direct(besoin), titre=besoin.titre_projet)
     if run is None:
         yield _message_run_deja_en_cours()
         return
@@ -673,8 +677,10 @@ def barre_etapes(resultat) -> str:
 COLONNES_HISTORIQUE = ["Projet", "Date", "Resultat", "Arret a"]
 ETAPES_ECHEC_LISIBLES = {"backend": "QA Backend", "frontend": "QA Frontend", "docker": "Validation Docker",
                          "docker (machine)": "Validation Docker (machine)", "e2e": "Tests E2E",
-                         "e2e (machine)": "Tests E2E (machine)"}
-COULEURS_STATUT = {"SUCCES": ("#ECFDF5", "#047857"), "ECHEC": ("#FEF2F2", "#B91C1C"),
+                         "e2e (machine)": "Tests E2E (machine)",
+                         "docker (non effectuee)": "Validation Docker (Docker non joignable)",
+                         "e2e (non effectues)": "Tests E2E (Docker non joignable)"}
+COULEURS_STATUT = {"SUCCES PARTIEL": ("#FFFBEB", "#B45309"), "SUCCES": ("#ECFDF5", "#047857"), "ECHEC": ("#FEF2F2", "#B91C1C"),
                    "PLANTAGE": ("#FEF2F2", "#B91C1C"), "INTERROMPU": ("#FFF7ED", "#C2410C"),
                    "EN COURS": ("#FFF7ED", "#C2410C"), "A PRECISER": ("#FFFBEB", "#B45309")}
 MESSAGES_ETAPE = {
@@ -695,6 +701,71 @@ CORRECTEURS = {"QA Backend": "le Developer corrige le code",
                "Validation Docker": "le Dockerization Agent corrige la configuration",
                "Tests E2E": "chaque scenario part vers celui qui peut le corriger (Agent E2E, Developer "
                             "ou Frontend Agent)"}
+# Sections repliables (<details>) : le suivi du run est redessine toutes les 5 s,
+# ce qui refermait les sections ouvertes (User stories, Plan de test...). Ce script
+# retient les sections ouvertes (par leur titre) et les rouvre apres chaque mise a jour.
+HEAD_AUTODEV = """<script>
+(() => {
+  if (window.__autodevSectionsGardees) return;
+  window.__autodevSectionsGardees = true;
+  const ouvertes = new Set();
+  const cle = (d) => {
+    const s = d.querySelector(':scope > summary');
+    return s ? s.textContent.trim().replace(/\\s*\\(\\d+\\)\\s*$/, '') : '';
+  };
+  document.addEventListener('toggle', (e) => {
+    const d = e.target;
+    if (!(d instanceof HTMLDetailsElement) || !cle(d)) return;
+    if (d.open) ouvertes.add(cle(d)); else ouvertes.delete(cle(d));
+  }, true);
+  const rouvrir = () => document.querySelectorAll('details:not([open])').forEach((d) => {
+    if (ouvertes.has(cle(d))) d.open = true;
+  });
+  new MutationObserver(rouvrir).observe(document.documentElement, {childList: true, subtree: true});
+})();
+</script>
+<script>
+(() => {
+  // AutoDev redemarre (docker compose up -d, mise a jour) : la page ouverte avant ne
+  // marche plus (bandeau « Erreur » sans explication). On le detecte et on le dit.
+  if (window.__autodevRedemarrage) return;
+  window.__autodevRedemarrage = true;
+  let premier = null, panne = false;
+  const bandeau = (texte) => {
+    let b = document.getElementById('autodev-redemarrage');
+    if (!b) {
+      b = document.createElement('div');
+      b.id = 'autodev-redemarrage';
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;padding:12px 16px;'
+        + 'background:#FEF3C7;color:#92400E;border-bottom:1px solid #F59E0B;font:15px sans-serif;text-align:center';
+      document.body.appendChild(b);
+    }
+    b.innerHTML = texte + ' <button onclick="location.reload()" style="margin-left:10px;padding:4px 12px;'
+      + 'border:1px solid #92400E;border-radius:6px;background:#FFF;color:#92400E;cursor:pointer">Recharger la page</button>';
+  };
+  const verifier = async () => {
+    try {
+      const r = await fetch(new URL('config', location.href), {cache: 'no-store', credentials: 'same-origin'});
+      if (r.status === 401 || r.status === 403) {
+        bandeau('AutoDev a redémarré : recharge la page (il faudra peut-être te reconnecter).');
+        return;
+      }
+      if (!r.ok) return;
+      const id = (await r.json()).app_id;
+      if (premier === null) premier = id;
+      else if (id !== premier) bandeau('AutoDev a redémarré : cette page ne peut plus lancer ni suivre de run.');
+      else if (panne) { panne = false; const b = document.getElementById('autodev-redemarrage'); if (b) b.remove(); }
+    } catch (e) {
+      panne = true;
+      bandeau('AutoDev ne répond plus (arrêté ou en train de redémarrer). Attends quelques secondes.');
+    }
+  };
+  verifier();
+  setInterval(verifier, 10000);
+})();
+</script>"""
+
+
 # Style de la page (passe a demo.launch : Gradio 6)
 CSS_AUTODEV = """
 .carte { background: #FFFFFF !important; border: 1px solid #E5E7EB !important;
@@ -797,6 +868,73 @@ def plan_de_test_du_run(resultat):
     return gr.update(visible=False)
 
 
+# ---------- Fichiers du run a telecharger ----------
+
+# Jamais dans un zip : secrets, dependances installees, caches
+EXCLUS_DU_ZIP = {"node_modules", "__pycache__", ".venv", "venv", ".pytest_cache", ".git"}
+
+
+def _secret(nom: str) -> bool:
+    """.env, .env.local... sont des secrets ; .env.example n'en contient pas."""
+    return nom == ".env" or (nom.startswith(".env.") and nom != ".env.example")
+
+
+def _dossier_du_run_ou_archive(resultat) -> Path | None:
+    """Dossier des fichiers du run : output/ s'il est encore a lui, sinon son archive."""
+    dossier = _fichiers_du_run(resultat)
+    if dossier is not None:
+        return dossier
+    id_run = (resultat or {}).get("id_run")
+    archive = Path(DOSSIER_ARCHIVES) / id_run if id_run else None
+    return archive if archive is not None and archive.is_dir() else None
+
+
+def _zipper(source: Path, cible: Path, sous_dossiers: list[str] | None = None) -> Path | None:
+    """Zip de source (ou de ses sous-dossiers choisis), sans secrets ni dependances."""
+    import zipfile
+    racines = [source / s for s in sous_dossiers] if sous_dossiers else [source]
+    fichiers = [f for r in racines if r.exists() for f in ([r] if r.is_file() else sorted(r.rglob("*")))
+                if f.is_file() and not _secret(f.name)
+                and not EXCLUS_DU_ZIP.intersection(f.relative_to(source).parts)]
+    if not fichiers:
+        return None
+    cible.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(cible, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in fichiers:
+            z.write(f, f.relative_to(source))
+    return cible
+
+
+def _json_de(objet) -> str:
+    if hasattr(objet, "model_dump_json"):
+        return objet.model_dump_json(indent=2)
+    import json
+    return json.dumps(objet, ensure_ascii=False, indent=2, default=str)
+
+
+def fichiers_du_run(resultat):
+    """Boutons « Telecharger » du run choisi : user stories, architecture,
+    code genere (zip sans .env) et preuves E2E (captures, videos, rapport).
+    Un bouton n'apparait que si son fichier existe."""
+    cache = Path(tempfile.gettempdir()) / "autodev_telechargements"
+    id_run = (resultat or {}).get("id_run") or "run"
+    sortie = cache / re.sub(r"[^\w.-]", "_", id_run)
+    fichiers = [None, None, None, None]
+    if resultat:
+        for i, (cle, nom) in enumerate((("user_stories", "user_stories.json"), ("architecture", "architecture.json"))):
+            if resultat.get(cle):
+                sortie.mkdir(parents=True, exist_ok=True)
+                (sortie / nom).write_text(_json_de(resultat[cle]), encoding="utf-8")
+                fichiers[i] = sortie / nom
+        dossier = _dossier_du_run_ou_archive(resultat)
+        if dossier is not None:
+            fichiers[2] = _zipper(dossier, sortie / f"code_{sortie.name}.zip")
+            fichiers[3] = _zipper(dossier / "e2e", sortie / f"preuves_e2e_{sortie.name}.zip",
+                                  ["etapes", "captures", "rapport_e2e.json"])
+    return tuple(gr.update(value=str(f), visible=True) if f else gr.update(value=None, visible=False)
+                 for f in fichiers)
+
+
 # ---------- Etat d'un run, en mots ----------
 
 def run_en_cours() -> bool:
@@ -812,7 +950,9 @@ def statut_du_run(resultat) -> str:
         return "A PRECISER"
     if resultat.get("erreur"):
         return "PLANTAGE"
-    return "SUCCES" if resultat.get("succes") else "ECHEC"
+    if resultat.get("succes"):
+        return "SUCCES PARTIEL" if etapes_non_effectuees(resultat) else "SUCCES"
+    return "ECHEC"
 
 
 def message_en_ce_moment(resultat) -> str:
@@ -822,6 +962,10 @@ def message_en_ce_moment(resultat) -> str:
     statut = statut_du_run(resultat)
     if statut == "SUCCES":
         return "Termine : l'application est prete dans output/ (backend, frontend, Docker et plan de test)."
+    if statut == "SUCCES PARTIEL":
+        return ("Termine, mais l'application n'a ete ni demarree ni testee de bout en bout : Docker n'etait pas "
+                "joignable (Validation Docker et tests E2E non effectues). Demarre AutoDev avec "
+                "docker-compose.validation.yml, puis Relancer a partir de « Validation Docker ».")
     if statut == "A PRECISER":
         analyse = resultat["demande_a_preciser"]
         if analyse.scenarios:
@@ -1134,9 +1278,9 @@ def vue_run(resultat, avec_chrono=False) -> str:
     titre = besoin.titre_projet if besoin else ""
     chrono = chrono_du_run(resultat) if avec_chrono else ""
     en_cours = statut == "EN COURS"
-    fond_message = {"EN COURS": "#FFEDD5", "SUCCES": "#DCFCE7"}.get(statut, "#FEE2E2")
-    couleur_message = {"EN COURS": "#7C2D12", "SUCCES": "#14532D"}.get(statut, "#7F1D1D")
-    titre_message = {"EN COURS": "En ce moment", "SUCCES": "Resultat"}.get(statut, "A faire")
+    fond_message = {"EN COURS": "#FFEDD5", "SUCCES": "#DCFCE7", "SUCCES PARTIEL": "#FEF3C7"}.get(statut, "#FEE2E2")
+    couleur_message = {"EN COURS": "#7C2D12", "SUCCES": "#14532D", "SUCCES PARTIEL": "#78350F"}.get(statut, "#7F1D1D")
+    titre_message = {"EN COURS": "En ce moment", "SUCCES": "Resultat", "SUCCES PARTIEL": "Resultat"}.get(statut, "A faire")
     return (
         f'<div style="border:1px solid {"#FDBA74" if en_cours else "#E5E7EB"};border-radius:12px;padding:14px 16px;'
         f'background:{"#FFFBF5" if en_cours else "#FFFFFF"}">'
@@ -1204,9 +1348,12 @@ def relance_pour(id_run, resultat):
     """Liste et bouton « Relancer » pour le run choisi (bouton grise pendant
     un run). Sorties : liste, bouton."""
     choix = choix_de_relance(id_run)
-    etape = _etape_du_choix(choix[0])
+    premier = choix[0]
+    if statut_du_run(resultat) == "SUCCES PARTIEL" and "Validation Docker" in choix:
+        premier = "Validation Docker"  # repartir la ou Docker n'etait pas joignable
+    etape = _etape_du_choix(premier)
     occupe = run_en_cours() or bool(resultat and resultat.get("_en_cours"))
-    return (gr.update(choices=choix, value=choix[0]),
+    return (gr.update(choices=choix, value=premier),
             gr.update(value=f"Relancer a partir de « {etape} »", interactive=not occupe))
 
 
@@ -1239,13 +1386,13 @@ def choisir_run(ids, evt: gr.SelectData):
     Sorties : id_run, texte de l'ID, vue du run, liens, plan, liste et bouton Relancer."""
     ligne = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
     if ligne is None or ligne >= len(ids):
-        return (gr.update(),) * 7
+        return (gr.update(),) * 11
     id_run = ids[ligne]
     resultat = etat_du_run(id_run)
     if _est_le_run_qui_tourne(id_run):
         resultat = dict(resultat, _en_cours="en_cours")  # pas encore fini : EN COURS
     return (id_run, texte_id(id_run), vue_run(resultat), liens_application(resultat),
-            plan_de_test_du_run(resultat), *relance_pour(id_run, resultat))
+            plan_de_test_du_run(resultat), *relance_pour(id_run, resultat), *fichiers_du_run(resultat))
 
 
 # « Runs existants » : le resultat d'un run s'affiche quand on clique sur sa ligne
@@ -1263,7 +1410,7 @@ def charger_page():
     lignes, ids = runs_pour_tableau()
     return (tableau_runs(lignes), ids, gr.update(), "ID : —", gr.update(), VUE_CHOISIR_UN_RUN, "",
             gr.update(visible=False), gr.update(),
-            gr.update(value=TEXTE_AUCUN_RUN_CHOISI, interactive=False))
+            gr.update(value=TEXTE_AUCUN_RUN_CHOISI, interactive=False), *fichiers_du_run(None))
 
 
 def _etat_pour_le_suivi(resultat):
@@ -1345,8 +1492,25 @@ def ajouter_a_la_file(titre, description, utilisateurs, fonctionnalites, structu
     return _ajouter_besoin(collecter_besoin(titre, description, utilisateurs, fonctionnalites, structure))
 
 
+def _projet_en_cours(titre: str) -> bool:
+    """Le run qui tourne en ce moment est-il ce projet ? (relance : reconnu par son ID)"""
+    run = _run_actif
+    if run is None or run.termine:
+        return False
+    if getattr(run, "titre", ""):
+        return meme_projet(run.titre, titre)
+    slug = re.sub(r"[^a-z0-9]+", "-", titre.lower()).strip("-")[:30]
+    return bool(slug) and (run.id_run or "").startswith(slug + "-")
+
+
 def _ajouter_besoin(besoin: BesoinUtilisateur):
-    element = FILE.ajouter(besoin)
+    if _projet_en_cours(besoin.titre_projet):
+        return alerte_depuis_texte(f"⚠️ « {besoin.titre_projet} » est deja en cours : il n'est pas ajoute "
+                                   "a la file une deuxieme fois."), vue_file()
+    try:
+        element = FILE.ajouter(besoin)
+    except ProjetDejaDansLaFile as e:
+        return alerte_depuis_texte(f"⚠️ {e}"), vue_file()
     position = sum(1 for e in FILE.copie() if e.statut in (EN_ATTENTE, EN_COURS))
     message = (f"✔ « {element.titre} » ajoute a la file (position {position}). "
                "Tu peux remplir un autre projet et l'ajouter aussi.")
@@ -1685,6 +1849,13 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
                         )
                         bouton_relancer = gr.Button(TEXTE_AUCUN_RUN_CHOISI, variant="primary", interactive=False)
                     bouton_plan = gr.DownloadButton("Telecharger le plan de test", visible=False, size="sm")
+                    with gr.Row():
+                        boutons_fichiers = [
+                            gr.DownloadButton(texte, visible=False, size="sm")
+                            for texte in ("Telecharger les user stories", "Telecharger l'architecture",
+                                          "Telecharger le code genere (zip, sans .env)",
+                                          "Telecharger les captures et videos E2E (zip)")
+                        ]
             vue_choisie = gr.HTML(VUE_CHOISIR_UN_RUN)
 
     # Composants caches, utilises par les fonctions du pipeline
@@ -1733,7 +1904,8 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
         concurrency_limit=None,
     )
     demo.load(fn=charger_page, outputs=[table_runs, ids_runs, id_run, id_affiche, resultat_state,
-                                        vue_choisie, liens, bouton_plan, etape_relance, bouton_relancer])
+                                        vue_choisie, liens, bouton_plan, etape_relance, bouton_relancer,
+                                        *boutons_fichiers])
     # Le suivi (onglet « Run en cours ») et l'historique suivent le run
     resultat_state.change(fn=vue_suivi, inputs=resultat_state, outputs=suivi)
     resultat_state.change(fn=apres_changement_du_run, inputs=resultat_state,
@@ -1754,7 +1926,8 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
     # Onglet « Runs existants »
     table_runs.select(
         fn=choisir_run, inputs=[ids_runs],
-        outputs=[id_run, id_affiche, vue_choisie, liens, bouton_plan, etape_relance, bouton_relancer],
+        outputs=[id_run, id_affiche, vue_choisie, liens, bouton_plan, etape_relance, bouton_relancer,
+                 *boutons_fichiers],
     )
     bouton_actualiser.click(fn=actualiser_runs, outputs=[table_runs, ids_runs])
     etape_relance.change(fn=libelle_relancer, inputs=etape_relance, outputs=bouton_relancer)
@@ -1770,6 +1943,7 @@ def identifiants_formulaire() -> tuple[str, str] | None:
 def lancer_formulaire(**options):
     """Lance le formulaire, protege par mot de passe si .env le definit."""
     options.setdefault("css", CSS_AUTODEV)
+    options.setdefault("head", HEAD_AUTODEV)
     identifiants = identifiants_formulaire()
     if identifiants:
         return demo.launch(auth=identifiants, **options)

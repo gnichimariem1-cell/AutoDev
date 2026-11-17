@@ -203,3 +203,18 @@ def test_commande_du_backend_presente(mock_compose, mock_http, tmp_path):
     assert rapport.etapes[-1].nom == "commandes" and rapport.etapes[-1].details == "claude"
     verifiees = [c.args[1] for c in faux.call_args_list if c.args[1][0] == "exec"]
     assert verifiees == [["exec", "-T", "app", "sh", "-c", "command -v claude"]]  # pas git (dans tests/)
+
+
+@patch.object(validation_docker, "_commande_compose", return_value=["docker", "compose"])
+def test_port_occupe_dit_quel_projet_arreter(mock_compose, ports_libres, tmp_path):
+    """Le message nomme le projet Docker qui tient les ports et donne la commande exacte."""
+    ports_libres.return_value = True
+    ps = MagicMock(returncode=0, stdout="labo-frontend-1\tlabo\nlabo-app-1\tlabo\n")
+    with patch.object(validation_docker, "_executer", _faux_compose()), \
+            patch.object(validation_docker.shutil, "which", return_value="/usr/bin/docker"), \
+            patch.object(validation_docker.subprocess, "run", return_value=ps):
+        rapport = valider_dockerisation(_dossier_docker(tmp_path))
+    assert rapport.erreur_environnement is True
+    assert "\u00ab labo \u00bb" in rapport.erreurs[0] and "`docker compose -p labo down`" in rapport.erreurs[0]
+    with patch.object(validation_docker.subprocess, "run", return_value=MagicMock(returncode=0, stdout="")):
+        assert "docker compose down" in validation_docker._conseil_ports([8080])

@@ -278,3 +278,36 @@ def test_erreur_du_projet_reste_du_projet():
     # une erreur ordinaire du code genere ne doit pas etre prise pour une limite
     assert cause_de_l_arret({"succes": False, "etape": "developer",
                              "erreur": "AssertionError : la page affiche 3 elements, limite attendue 2"}) == "projet"
+
+
+def test_le_meme_projet_n_est_pas_ajoute_deux_fois():
+    file, lances, _ = file_avec({"Inventaire": SUCCES})
+    file.mettre_en_pause()
+    file.ajouter(besoin("Inventaire"))
+    with pytest.raises(fa.ProjetDejaDansLaFile):
+        file.ajouter(besoin("  inventaire "))
+    assert statuts(file) == [("Inventaire", "en attente")] and lances == []
+
+
+def test_un_projet_termine_peut_etre_ajoute_de_nouveau():
+    file, lances, _ = file_avec({"Inventaire": [SUCCES, SUCCES]})
+    file.ajouter(besoin("Inventaire"))
+    file.attendre_fin()
+    file.ajouter(besoin("Inventaire"))
+    file.attendre_fin()
+    assert lances == ["Inventaire", "Inventaire"]
+
+
+def test_formulaire_refuse_le_projet_deja_en_cours(file_vue, monkeypatch):
+    app, file, lances = file_vue
+    monkeypatch.setattr(app, "_run_actif", SimpleNamespace(termine=False, titre="Inventaire", id_run=""))
+    message, _ = app.ajouter_a_la_file("Inventaire", "Gestion de l'inventaire du labo", "membres", "ajouter, lister", "")
+    assert "deja en cours" in message and file.copie() == [] and lances == []
+
+
+def test_formulaire_refuse_le_projet_deja_dans_la_file(file_vue):
+    app, file, lances = file_vue
+    file.mettre_en_pause()
+    app.ajouter_a_la_file("Inventaire", "Gestion de l'inventaire du labo", "membres", "ajouter, lister", "")
+    message, _ = app.ajouter_a_la_file("Inventaire", "Gestion de l'inventaire du labo", "membres", "ajouter, lister", "")
+    assert "deja dans la file" in message and len(file.copie()) == 1

@@ -41,6 +41,15 @@ ECHEC = "echec"
 ARRETE_MACHINE = "arrete (machine)"
 REMIS = "remis dans la file"
 
+
+class ProjetDejaDansLaFile(ValueError):
+    """Le meme projet attend ou tourne deja : il n'est pas ajoute une deuxieme fois."""
+
+
+def meme_projet(titre_a: str, titre_b: str) -> bool:
+    """Meme titre, sans tenir compte des majuscules ni des espaces en trop."""
+    return " ".join(titre_a.split()).casefold() == " ".join(titre_b.split()).casefold()
+
 # Erreurs qui viennent de la machine ou du compte, pas du projet
 MOTS_MACHINE = (
     "authenticate", "auth login", "setup-token", "not logged in", "please run /login",
@@ -135,6 +144,10 @@ class FileAttente:
 
     def ajouter(self, besoin: BesoinUtilisateur) -> ElementFile:
         with self._verrou:
+            for e in self.elements:
+                if e.statut in (EN_ATTENTE, EN_COURS, ARRETE_MACHINE) and meme_projet(e.titre, besoin.titre_projet):
+                    raise ProjetDejaDansLaFile(f"« {e.titre} » est deja dans la file (n° {e.numero}, {e.statut}) : "
+                                               "il n'est pas ajoute une deuxieme fois.")
             numero = max((e.numero for e in self.elements), default=0) + 1
             element = ElementFile(numero=numero, titre=besoin.titre_projet, besoin=besoin.model_dump())
             self.elements.append(element)

@@ -24,7 +24,7 @@ def test_agent_e2e_recoit_la_fixture_etape(tmp_path):
     with patch("src.agent_e2e.e2e.subprocess.run", side_effect=claude) as mock_run:
         e2e.generer_tests_e2e(USER_STORIES, "demande", dossier=str(tmp_path / "e2e"))
     consigne = mock_run.call_args.kwargs["input"]
-    assert 'etape("nom")' in consigne and "entre 6 et 12" in consigne and "3 a 6" not in consigne
+    assert 'etape("nom", element)' in consigne and "entre 6 et 12" in consigne and "3 a 6" not in consigne
 
 
 def test_lister_captures_avec_etapes(tmp_path):
@@ -73,3 +73,25 @@ def test_etapes_affichees_dans_le_detail(tmp_path):
     rapport = E2E_OK.model_copy(update={"captures": [CaptureE2E(id="E21", etapes=[str(image)])]})
     detail = app._details({"id_run": "r1", "succes": True, "rapport_e2e": rapport})
     assert "formulaire rempli" in detail and "data:image/jpeg;base64," in detail
+
+
+def test_etape_montre_l_element_verifie(tmp_path, monkeypatch):
+    """L'image d'une etape montre l'element verifie (defilement), sinon toute la page."""
+    import types
+    espace = {}
+    exec(e2e.CONFTEST.split("@pytest.fixture(scope=\"session\")\ndef browser_context_args")[0], espace)
+    monkeypatch.setenv("E2E_DOSSIER_ETAPES", str(tmp_path))
+    page = MagicMock()
+    requete = types.SimpleNamespace(node=types.SimpleNamespace(name="test_E23_tableau"),
+                                    getfixturevalue=lambda nom: page)
+    capturer = espace["etape"].__wrapped__(requete)
+    message = MagicMock()
+    capturer("classement", message)
+    message.first.scroll_into_view_if_needed.assert_called_once()
+    assert page.screenshot.call_args.kwargs.get("full_page") is None
+    capturer("page_entiere")
+    assert page.screenshot.call_args.kwargs["full_page"] is True
+    message.first.scroll_into_view_if_needed.side_effect = TimeoutError("introuvable")
+    capturer("introuvable", message)
+    assert page.screenshot.call_args.kwargs["full_page"] is True
+    assert page.screenshot.call_args.kwargs["path"].replace("\\", "/").endswith("E23/03-introuvable.png")

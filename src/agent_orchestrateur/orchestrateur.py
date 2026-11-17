@@ -253,6 +253,20 @@ def etat_du_run(id_run: str) -> dict:
     return dict(GRAPHE.get_state({"configurable": {"thread_id": id_run}}).values or {})
 
 
+def etapes_non_effectuees(valeurs) -> list[str]:
+    """Etapes sautees parce que Docker n'etait pas joignable : le run s'est termine,
+    mais l'application n'a ete ni demarree ni testee de bout en bout."""
+    sautees = []
+    validation = valeurs.get("rapport_validation_docker")
+    if validation is not None and not getattr(validation, "docker_disponible", True):
+        sautees.append("docker")
+    e2e = valeurs.get("rapport_e2e")
+    if (e2e is not None and not getattr(e2e, "docker_disponible", True)
+            and "desactiv" not in " ".join(getattr(e2e, "erreurs", []) or []).lower()):
+        sautees.append("e2e")
+    return sautees
+
+
 def historique_runs(limite: int = 30) -> list[dict]:
     """Les runs sauvegardes, du plus recent au plus ancien. Pour chacun :
     id_run, titre, date, statut (SUCCES, ECHEC, PLANTAGE, INTERROMPU),
@@ -277,7 +291,12 @@ def historique_runs(limite: int = 30) -> list[dict]:
         elif snapshot.next:
             statut, etape = "INTERROMPU", snapshot.next[0]
         elif valeurs.get("succes"):
-            statut, etape = "SUCCES", ""
+            sautees = etapes_non_effectuees(valeurs)
+            if sautees:
+                statut = "SUCCES PARTIEL"
+                etape = "docker (non effectuee)" if "docker" in sautees else "e2e (non effectues)"
+            else:
+                statut, etape = "SUCCES", ""
         else:
             statut, etape = "ECHEC", valeurs.get("etape", "")
             validation = valeurs.get("rapport_validation_docker")

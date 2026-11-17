@@ -78,3 +78,30 @@ def test_erreurs_e2e_affichees_dans_le_detail():
     assert "attendu 422, obtenu 201" in _details(resultat)
     desactive = _NS(docker_disponible=False, succes=False, erreurs=["Tests E2E desactives (E2E_ACTIF=0)."])
     assert "Erreurs trouvees" not in _details({"id_run": "r1", "succes": True, "rapport_e2e": desactive})
+
+
+def test_les_sections_ouvertes_restent_ouvertes(monkeypatch):
+    """Le suivi est redessine toutes les 5 s : le script de la page rouvre les sections."""
+    from src.agent_form import app
+    options = {}
+    monkeypatch.setattr(app.demo, "launch", lambda **kw: options.update(kw))
+    monkeypatch.delenv("GRADIO_AUTH_USER", raising=False)
+    monkeypatch.delenv("GRADIO_AUTH_PASSWORD", raising=False)
+    app.lancer_formulaire()
+    assert "MutationObserver" in options["head"] and "toggle" in options["head"]
+    # AutoDev redemarre : la page le detecte (app_id change) et propose de recharger
+    assert "app_id" in options["head"] and "AutoDev a redémarré" in options["head"]
+
+
+def test_docker_non_joignable_succes_partiel():
+    """Docker non joignable : le run se termine, mais il est affiche SUCCES PARTIEL, pas SUCCES."""
+    from types import SimpleNamespace as NS
+    from src.agent_form import app
+    sans_docker = {"succes": True, "rapport_validation_docker": NS(succes=False, docker_disponible=False),
+                   "rapport_e2e": NS(docker_disponible=False, succes=False, erreurs=["Docker n'est pas joignable."])}
+    assert app.statut_du_run(sans_docker) == "SUCCES PARTIEL"
+    assert "Validation Docker" in app.message_en_ce_moment(sans_docker)
+    desactive = {"succes": True, "rapport_validation_docker": NS(succes=True, docker_disponible=True),
+                 "rapport_e2e": NS(docker_disponible=False, succes=False, erreurs=["Tests E2E desactives (E2E_ACTIF=0)."])}
+    assert app.statut_du_run(desactive) == "SUCCES"
+    assert app.statut_du_run({"succes": True}) == "SUCCES"

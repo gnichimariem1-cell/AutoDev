@@ -230,3 +230,30 @@ def test_relance_affichee_depuis_l_etat_sauvegarde(monkeypatch):
     etats = {libelle: etat for libelle, etat, _ in app.etats_des_etapes(app._etat_pour_le_suivi(None))}
     assert etats["Product Owner"] == "ok" and etats["Validation Docker"] == "ok"
     assert etats["Agent E2E"] == "en_cours"
+
+
+def test_boutons_telecharger_les_fichiers_du_run(agents):
+    """User stories, architecture, code (zip sans .env) et preuves E2E du run choisi."""
+    import zipfile
+    from pathlib import Path
+    from src.agent_form.app import fichiers_du_run
+    resultat = executer_pipeline(BESOIN)
+    dossier = Path(resultat["dossier_docker"])
+    (dossier / ".env").write_text("SECRET=1")
+    (dossier / ".env.example").write_text("SECRET=")
+    (dossier / "e2e" / "etapes" / "E01").mkdir(parents=True, exist_ok=True)
+    (dossier / "e2e" / "etapes" / "E01" / "01.png").write_bytes(b"png")
+    (dossier / "e2e" / "test_api_e2e.py").write_text("# code")
+    us, archi, code, e2e = fichiers_du_run(resultat)
+    assert us["visible"] and archi["visible"] and code["visible"] and e2e["visible"]
+    assert "Todo" in Path(us["value"]).read_text(encoding="utf-8") or Path(us["value"]).stat().st_size > 2
+    noms = zipfile.ZipFile(code["value"]).namelist()
+    assert ".env" not in noms and ".env.example" in noms
+    preuves = zipfile.ZipFile(e2e["value"]).namelist()
+    assert any(n.endswith("01.png") for n in preuves) and "test_api_e2e.py" not in str(preuves)
+    # Aucun run choisi : aucun bouton
+    assert all(b["visible"] is False for b in fichiers_du_run(None))
+    # Run suivant : les fichiers du premier sont archives, mais restent telechargeables
+    executer_pipeline(BESOIN)
+    _, _, code_archive, _ = fichiers_du_run(resultat)
+    assert code_archive["visible"] and ".env" not in zipfile.ZipFile(code_archive["value"]).namelist()

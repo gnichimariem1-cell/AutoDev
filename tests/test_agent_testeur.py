@@ -203,3 +203,13 @@ def test_generer_plan_sans_besoin_inchange(mock_run, tmp_path):
     mock_run.side_effect = _claude_qui_ecrit_un_test(tmp_path, PLAN_JSON)
     generer_plan_et_tests(USER_STORIES, str(tmp_path))
     assert "Besoin exprime par l'utilisateur" not in mock_run.call_args.kwargs["input"]
+
+
+def test_code_attendu_pas_un_seul_entier():
+    """Run Materiel du labo : le Test Agent plantait sur "-" et "201/409"."""
+    from src.common.schemas import CasDeTest
+    base = dict(id="T1", user_story="US1", scenario="s", methode="POST", route="/x", resultat_attendu="r")
+    assert CasDeTest(**base, code_attendu=201).code_attendu == 201
+    assert CasDeTest(**base, code_attendu="201/409").code_attendu == "201/409"
+    assert CasDeTest(**base, code_attendu="-").code_attendu == "-"
+    assert CasDeTest(**base).code_attendu is None

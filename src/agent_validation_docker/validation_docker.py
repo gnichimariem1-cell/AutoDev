@@ -77,6 +77,45 @@ def _port_occupe(port: int) -> bool:
         return False
 
 
+def _qui_occupe(ports: list[int]) -> dict[str, list[str]]:
+    """Projets Docker (et leurs conteneurs) qui publient ces ports sur la machine.
+    Vide si ce n'est pas Docker qui les tient, ou si on ne peut pas le savoir."""
+    docker_bin = shutil.which("docker")
+    if not docker_bin:
+        return {}
+    filtres = [arg for port in ports for arg in ("--filter", f"publish={port}")]
+    try:
+        sortie = subprocess.run(
+            [docker_bin, "ps", *filtres, "--format", '{{.Names}}\t{{.Label "com.docker.compose.project"}}'],
+            capture_output=True, text=True, timeout=10, encoding="utf-8", errors="replace",
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    projets: dict[str, list[str]] = {}
+    for ligne in sortie.stdout.splitlines() if sortie.returncode == 0 else []:
+        nom, _, projet = ligne.partition("\t")
+        if nom.strip():
+            projets.setdefault(projet.strip() or "", []).append(nom.strip())
+    return projets
+
+
+def _conseil_ports(ports: list[int]) -> str:
+    projets = _qui_occupe(ports)
+    if not projets:
+        return ("Arreter l'application qui les utilise (ex : `docker compose down` dans output/) "
+                "puis relancer.")
+    morceaux, commandes = [], []
+    for projet, conteneurs in projets.items():
+        if projet:
+            morceaux.append(f"projet Docker \u00ab {projet} \u00bb ({', '.join(conteneurs)})")
+            commandes.append(f"`docker compose -p {projet} down`")
+        else:
+            morceaux.append(f"conteneur(s) {', '.join(conteneurs)}")
+            commandes.append(f"`docker stop {' '.join(conteneurs)}`")
+    return (f"Ils sont tenus par : {' ; '.join(morceaux)}. "
+            f"Pour liberer les ports : {' puis '.join(commandes)}, puis relancer.")
+
+
 def _attendre_reponse_http(url: str, timeout: int, exige_200: bool = False) -> str | None:
     """Interroge url jusqu'a obtenir une reponse HTTP < 500 (exactement 200 si exige_200).
     Retourne None si OK, sinon le dernier probleme rencontre."""
@@ -178,8 +217,7 @@ def valider_dockerisation(dossier: str = "output") -> RapportValidationDocker:
         return echec(
             "ports",
             f"port(s) deja occupe(s) sur la machine : {', '.join(map(str, ports_occupes))}. "
-            "Arreter l'application qui les utilise (ex : `docker compose down` dans output/) "
-            "puis relancer.",
+            + _conseil_ports(ports_occupes),
             environnement=True,
         )
     etapes.append(EtapeValidationDocker(nom="ports", succes=True))

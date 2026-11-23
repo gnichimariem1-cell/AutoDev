@@ -163,8 +163,8 @@ def test_interface_resume_e2e():
     etats = {libelle: (etat, detail) for libelle, etat, detail in app.etats_des_etapes(resultat)}
     assert etats["Agent E2E"] == ("ok", "2 scenarios")
     assert etats["Tests E2E"] == ("attention", "1/2")
-    assert app._resume_etape("Agent E2E", resultat) == "2 scenarios · 2 API, 0 interface"
-    assert "en echec : E02" in app._resume_etape("Tests E2E", resultat)
+    assert app._resume_etape("Agent E2E", resultat) == "2 scénarios · 2 API, 0 interface"
+    assert "en échec : E02" in app._resume_etape("Tests E2E", resultat)
     sans_nav = dict(resultat, rapport_e2e=E2E_KO.model_copy(update={"navigateur": False}))
     assert "API seulement" in app._resume_etape("Tests E2E", sans_nav)
 
@@ -281,7 +281,7 @@ def test_affichage_pendant_la_correction():
     assert etats["Tests E2E"] == ("en_cours", f"correction · tentative 1/{MAX_TENTATIVES}")
     fini = dict(resultat, succes=True, rapport_e2e=E2E_OK, tentative_e2e=2)
     fini.pop("_en_cours")
-    assert "corriges en 2 essais" in app._resume_etape("Tests E2E", fini)
+    assert "corrigés en 2 essais" in app._resume_etape("Tests E2E", fini)
 
 
 _NS_PLAN = __import__("tests.sorties", fromlist=["PLAN_E2E"]).PLAN_E2E
@@ -324,7 +324,7 @@ def test_scenario_ignore_compte_comme_non_verifie(tmp_path):
     resultat = {"id_run": "r1", "succes": True, "plan_e2e": s.PLAN_E2E, "rapport_e2e": rapport}
     etats = {libelle: (etat, detail) for libelle, etat, detail in app.etats_des_etapes(resultat)}
     assert etats["Tests E2E"] == ("attention", "1/2")
-    assert "non verifie(s) : E01" in app._resume_etape("Tests E2E", resultat)
+    assert "non vérifié(s) : E01" in app._resume_etape("Tests E2E", resultat)
     assert "○ non verifie" in app._details(resultat)
 
 
@@ -391,6 +391,38 @@ def test_captures_affichees_dans_le_detail(tmp_path):
     resultat = {"id_run": "r1", "succes": True, "rapport_e2e": rapport}
     detail = app._details(resultat)
     assert "Captures et videos des scenarios d" in detail and "E21" in detail
-    assert "data:image/jpeg;base64," in detail and "e2e/v.webm" in detail
-    assert "data:image" not in app._details(dict(resultat, _en_cours="en_cours"))  # pas de miniature pendant le run
-    assert "1 capture(s) et video(s)" in app._resume_etape("Tests E2E", resultat)
+    assert "capture de fin · vidéo" in detail and "galerie" in detail
+    assert "data:image" not in detail  # les images sont dans la galerie, pas en double ici
+    assert "1 capture(s) et vidéo(s)" in app._resume_etape("Tests E2E", resultat)
+
+
+def test_galerie_des_captures_et_run_archive(tmp_path, monkeypatch):
+    """La galerie montre etapes, capture de fin et video, avec leur legende ; pour un run
+    archive, les chemins output/... sont cherches dans archives/<id du run>/ (pas dans le
+    output/ d'un autre projet) ; rien pendant le run ni pour un fichier absent."""
+    from PIL import Image
+    from src.agent_form import app
+    from src.common.schemas import CaptureE2E
+    sortie, archive = tmp_path / "output", tmp_path / "archives" / "r1"
+    (sortie / "e2e" / "captures").mkdir(parents=True)
+    (sortie / ".id_run").write_text("autre-run")               # output/ est a un autre projet
+    Image.new("RGB", (64, 64), "red").save(sortie / "e2e" / "captures" / "fin.png")  # pas la bonne image
+    (archive / "e2e" / "captures").mkdir(parents=True)
+    (archive / "e2e" / "etapes" / "E25").mkdir(parents=True)
+    Image.new("RGB", (64, 64), "white").save(archive / "e2e" / "captures" / "fin.png")
+    Image.new("RGB", (64, 64), "white").save(archive / "e2e" / "etapes" / "E25" / "01-motif_obligatoire.png")
+    (archive / "e2e" / "captures" / "video.webm").write_bytes(b"webm")
+    monkeypatch.setattr(app, "DOSSIER_ARCHIVES", str(tmp_path / "archives"))
+    base = sortie.as_posix()
+    capture = CaptureE2E(id="E25", image=f"{base}/e2e/captures/fin.png", video=f"{base}/e2e/captures/video.webm",
+                         etapes=[f"{base}/e2e/etapes/E25/01-motif_obligatoire.png", f"{base}/e2e/etapes/E25/absente.png"])
+    resultat = {"id_run": "r1", "succes": True, "dossier_docker": str(sortie),
+                "rapport_e2e": E2E_OK.model_copy(update={"captures": [capture]})}
+    assert app.chemin_capture(capture.image, resultat) == archive / "e2e" / "captures" / "fin.png"
+    galerie = app.galerie_du_run(resultat)
+    assert galerie["visible"] is True
+    assert [legende for _, legende in galerie["value"]] == ["E25 · motif obligatoire", "E25 · capture de fin",
+                                                           "E25 · vidéo"]
+    assert all(str(archive) in chemin for chemin, _ in galerie["value"])
+    assert app.galerie_du_run(dict(resultat, _en_cours="e2e"))["visible"] is False
+    assert app.galerie_du_run(None)["visible"] is False

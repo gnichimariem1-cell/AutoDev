@@ -72,7 +72,7 @@ def test_etapes_affichees_dans_le_detail(tmp_path):
     Image.new("RGB", (1280, 720), "white").save(image)
     rapport = E2E_OK.model_copy(update={"captures": [CaptureE2E(id="E21", etapes=[str(image)])]})
     detail = app._details({"id_run": "r1", "succes": True, "rapport_e2e": rapport})
-    assert "formulaire rempli" in detail and "data:image/jpeg;base64," in detail
+    assert "formulaire rempli" in detail and "data:image" not in detail  # images : dans la galerie
 
 
 def test_etape_montre_l_element_verifie(tmp_path, monkeypatch):

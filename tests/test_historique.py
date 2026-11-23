@@ -104,7 +104,7 @@ def test_relancer_un_run_reussi_commence_au_product_owner(agents):
     assert choix[0] == "Product Owner"  # rien a reprendre : pas de « La ou il s'est arrete »
     liste, bouton = relance_pour(ok["id_run"], ok)
     assert liste["value"] == "Product Owner"
-    assert bouton["value"] == "Relancer a partir de « Product Owner »" and bouton["interactive"] is True
+    assert bouton["value"] == "Relancer à partir de « Product Owner »" and bouton["interactive"] is True
 
 
 def test_relancer_un_run_qui_a_plante(agents):
@@ -113,7 +113,7 @@ def test_relancer_un_run_qui_a_plante(agents):
     choix = choix_de_relance(ko["id_run"])
     assert choix[0] == "La ou il s'est arrete (Developer)"
     assert "Product Owner" in choix[1:]
-    assert relance_pour(ko["id_run"], ko)[1]["value"] == "Relancer a partir de « Developer »"
+    assert relance_pour(ko["id_run"], ko)[1]["value"] == "Relancer à partir de « Developer »"
 
 
 def test_relancer_premier_choix_reprend_le_run(agents):
@@ -257,3 +257,79 @@ def test_boutons_telecharger_les_fichiers_du_run(agents):
     executer_pipeline(BESOIN)
     _, _, code_archive, _ = fichiers_du_run(resultat)
     assert code_archive["visible"] and ".env" not in zipfile.ZipFile(code_archive["value"]).namelist()
+
+
+# --- Runs existants : filtres, run archive, panneau « que faire », nouveau projet ---
+
+def test_filtre_et_recherche_des_runs(agents):
+    from src.agent_form.app import actualiser_runs
+    ok = executer_pipeline(BESOIN)
+    agents.generer_code.side_effect = RuntimeError("credit Claude epuise")
+    ko = executer_pipeline(BESOIN)
+    _, ids = runs_pour_tableau("Plantage")
+    assert ko["id_run"] in ids and ok["id_run"] not in ids
+    _, ids = runs_pour_tableau("Succès")
+    assert ok["id_run"] in ids and ko["id_run"] not in ids
+    assert runs_pour_tableau(recherche="todo")[1]          # sans tenir compte des majuscules
+    assert runs_pour_tableau(recherche="projet inconnu") == ([], [])
+    assert actualiser_runs("Tous", "")[1] == runs_pour_tableau()[1]
+
+
+def test_run_archive_ne_se_relance_pas(agents):
+    """Un run dont output/ a ete repris par un run plus recent : Relancer est cache
+    (il ecrirait dans les fichiers d'un autre projet) et le panneau dit comment
+    revoir son application depuis archives/."""
+    from src.agent_form.app import panneau_du_run, run_archive
+    premier = executer_pipeline(BESOIN)
+    dernier = executer_pipeline(BESOIN)
+    assert run_archive(premier) and not run_archive(dernier)
+    liste, bouton = relance_pour(premier["id_run"], premier)
+    assert liste["visible"] is False and bouton["visible"] is False
+    panneau = panneau_du_run(premier["id_run"], premier)
+    assert "archive" in panneau and f"docker compose -p {premier['id_run']} up -d" in panneau
+    assert relance_pour(dernier["id_run"], dernier)[1]["visible"] is True
+    assert "output/" in panneau_du_run(dernier["id_run"], dernier)
+
+
+def test_succes_avec_scenarios_e2e_ko_propose_tests_e2e(agents):
+    from src.agent_form.app import panneau_du_run
+    from src.common.schemas import RapportE2E, EchecE2E
+    ok = executer_pipeline(BESOIN)
+    ok["rapport_e2e"] = RapportE2E(docker_disponible=True, succes=False, total=30, reussis=28,
+                                   echecs=[EchecE2E(id="E16", test="t", type="api", message="503")])
+    liste, bouton = relance_pour(ok["id_run"], ok)
+    assert liste["value"] == "Tests E2E" and bouton["value"] == "Relancer à partir de « Tests E2E »"
+    assert "28/30" in panneau_du_run(ok["id_run"], ok) and "E16" in panneau_du_run(ok["id_run"], ok)
+
+
+def test_relancer_comme_nouveau_projet(agents):
+    from src.agent_form.app import preremplir_depuis_run, bouton_nouveau_projet_pour
+    agents.generer_code.side_effect = RuntimeError("credit Claude epuise")
+    ko = executer_pipeline(BESOIN)
+    agents.generer_code.side_effect = None
+    executer_pipeline(BESOIN)                       # ko est maintenant archive
+    assert bouton_nouveau_projet_pour(etat_du_run(ko["id_run"]))["visible"] is True
+    titre, description, utilisateurs, fonctionnalites, structure, onglets = preremplir_depuis_run(ko["id_run"])
+    assert titre == BESOIN.titre_projet and description == BESOIN.description
+    assert fonctionnalites == ", ".join(BESOIN.fonctionnalites_cles)
+    assert onglets.selected == "nouveau"
+
+
+def test_detail_sous_chaque_etape(agents):
+    """« Run en cours » : chaque detail est sous la carte de son etape (plus regroupe
+    en bas), la barre d'etapes renvoie a la carte, une etape en echec s'ouvre seule."""
+    import re
+    from src.agent_form.app import ancre_etape
+    ok = executer_pipeline(BESOIN)
+    html = vue_run(ok)
+    carte_po = re.search(r'<details id="etape-product-owner".*?</details>', html, re.S).group(0)
+    assert "User stories" in carte_po and "Plan de test du Test Agent" not in carte_po
+    carte_test = re.search(r'<details id="etape-test-agent".*?</details>', html, re.S).group(0)
+    assert "Plan de test du Test Agent" in carte_test
+    assert f'href="#{ancre_etape("Tests E2E")}"' in html
+    assert "<details id=\"etape-product-owner\" data-cle=\"etape:Product Owner\" style" in html  # fermee si OK
+
+    agents.lancer_tests.return_value = QA_KO
+    ko = executer_pipeline(BESOIN)
+    carte_qa = re.search(r'<details id="etape-qa-backend"[^>]*>', vue_run(ko)).group(0)
+    assert " open" in carte_qa  # echec : ouverte, avec ses erreurs

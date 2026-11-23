@@ -205,7 +205,7 @@ def _section_validation_docker(resultat) -> str:
     if not rapport.docker_disponible:
         return "8. Docker Validation Agent — NON EFFECTUEE\n   Docker n'est pas joignable depuis le pipeline.\n"
     statut = "OK" if rapport.succes else "ECHEC"
-    lignes = [f"   - {e.nom} : {'OK' if e.succes else 'ECHEC'}" for e in rapport.etapes]
+    lignes = [f"   - {e.nom} : {'OK' if e.succes else 'ÉCHEC'}" for e in rapport.etapes]
     texte = (
         f"8. Docker Validation Agent — {statut} (tentative {resultat.get('tentative_docker', '?')})\n"
         + "\n".join(lignes) + "\n"
@@ -674,7 +674,7 @@ def barre_etapes(resultat) -> str:
 
 
 # --- Interface : onglets « Run en cours » et « Runs existants » ---
-COLONNES_HISTORIQUE = ["Projet", "Date", "Resultat", "Arret a"]
+COLONNES_HISTORIQUE = ["Projet", "Date", "Résultat", "Arrêté à"]
 ETAPES_ECHEC_LISIBLES = {"backend": "QA Backend", "frontend": "QA Frontend", "docker": "Validation Docker",
                          "docker (machine)": "Validation Docker (machine)", "e2e": "Tests E2E",
                          "e2e (machine)": "Tests E2E (machine)",
@@ -708,19 +708,29 @@ HEAD_AUTODEV = """<script>
 (() => {
   if (window.__autodevSectionsGardees) return;
   window.__autodevSectionsGardees = true;
-  const ouvertes = new Set();
+  const ouvertes = new Set(), fermees = new Set();
   const cle = (d) => {
+    if (d.dataset.cle) return d.dataset.cle;
     const s = d.querySelector(':scope > summary');
     return s ? s.textContent.trim().replace(/\\s*\\(\\d+\\)\\s*$/, '') : '';
   };
   document.addEventListener('toggle', (e) => {
     const d = e.target;
     if (!(d instanceof HTMLDetailsElement) || !cle(d)) return;
-    if (d.open) ouvertes.add(cle(d)); else ouvertes.delete(cle(d));
+    if (d.open) { ouvertes.add(cle(d)); fermees.delete(cle(d)); }
+    else { ouvertes.delete(cle(d)); fermees.add(cle(d)); }
   }, true);
-  const rouvrir = () => document.querySelectorAll('details:not([open])').forEach((d) => {
-    if (ouvertes.has(cle(d))) d.open = true;
+  const rouvrir = () => document.querySelectorAll('details').forEach((d) => {
+    if (!d.open && ouvertes.has(cle(d))) d.open = true;
+    else if (d.open && fermees.has(cle(d))) d.open = false;
   });
+  // Clic sur une etape de la barre : sa carte s'ouvre
+  document.addEventListener('click', (e) => {
+    const lien = e.target.closest && e.target.closest('a[href^="#etape-"]');
+    if (!lien) return;
+    const carte = document.getElementById(lien.getAttribute('href').slice(1));
+    if (carte instanceof HTMLDetailsElement) { carte.open = true; ouvertes.add(cle(carte)); fermees.delete(cle(carte)); }
+  }, true);
   new MutationObserver(rouvrir).observe(document.documentElement, {childList: true, subtree: true});
 })();
 </script>
@@ -772,7 +782,8 @@ CSS_AUTODEV = """
          border-radius: 12px !important; padding: 14px !important; gap: 10px !important; }
 .carte .prose, .carte .prose * { color: #374151 !important; }
 .table-runs, .table-runs * { font-family: var(--font) !important; }
-.table-runs td { font-size: 14px !important; }
+.table-runs td { font-size: 14px !important; overflow-wrap: anywhere; }
+.table-runs table { table-layout: fixed !important; width: 100% !important; }
 .table-runs th { background: #F9FAFB !important; color: #6B7280 !important; font-size: 13px !important; }
 """
 COULEURS_PRIORITE = {"haute": ("#FEF2F2", "#B91C1C"), "moyenne": ("#FFF7ED", "#C2410C"), "basse": ("#F1F5F9", "#475569")}
@@ -785,17 +796,35 @@ def _e(texte) -> str:
 
 # ---------- Historique ----------
 
-def runs_pour_tableau() -> tuple[list[list[str]], list[str]]:
+# Filtres de « Runs existants » : libelle -> debut du statut (None : tous les runs)
+FILTRES_RUNS = {"Tous": None, "Succès": "SUCCES", "Échec": "ECHEC", "Plantage": "PLANTAGE",
+                "Interrompu": "INTERROMPU", "En cours": "EN COURS"}
+
+
+def _sans_accents(texte) -> str:
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFKD", str(texte or ""))
+                   if not unicodedata.combining(c)).lower()
+
+
+def runs_pour_tableau(filtre: str = "Tous", recherche: str = "") -> tuple[list[list[str]], list[str]]:
     """Lignes du tableau (Projet, Date, Resultat, Arret a) et ID de chaque ligne,
-    du run le plus recent au plus ancien."""
+    du run le plus recent au plus ancien. filtre : un libelle de FILTRES_RUNS ;
+    recherche : un morceau du nom du projet (sans tenir compte des accents)."""
     lignes, ids = [], []
     actif = _run_actif.id_run if run_en_cours() else None
+    debut = FILTRES_RUNS.get(filtre)
+    cherche = _sans_accents(recherche).strip()
     for run in historique_runs():
         etape = run["etape"]
         arret = ETAPES_ECHEC_LISIBLES.get(etape) or LIBELLES_NOEUDS.get(etape, etape) or "—"
-        statut = run["statut"] + (" · archive" if run["archive"] else "")
+        statut = run["statut"] + (" · archivé" if run["archive"] else "")
         if run["id_run"] == actif:
             statut, arret = "EN COURS", "—"
+        if debut and not statut.startswith(debut):  # « Succès » garde aussi SUCCES PARTIEL
+            continue
+        if cherche and cherche not in _sans_accents(run["titre"]):
+            continue
         lignes.append([run["titre"], run["date"], statut, arret])
         ids.append(run["id_run"])
     return lignes, ids
@@ -813,8 +842,8 @@ def tableau_runs(lignes):
     return [[projet, date, _pastille_statut(statut), arret] for projet, date, statut, arret in lignes]
 
 
-def actualiser_runs():
-    lignes, ids = runs_pour_tableau()
+def actualiser_runs(filtre: str = "Tous", recherche: str = ""):
+    lignes, ids = runs_pour_tableau(filtre, recherche)
     return tableau_runs(lignes), ids
 
 
@@ -976,6 +1005,10 @@ def message_en_ce_moment(resultat) -> str:
                 f"{pistes[:1].upper() + pistes[1:]}. Cree un nouveau projet plus precis dans « Nouveau projet ».")
     if statut == "PLANTAGE":
         etape = LIBELLES_NOEUDS.get(resultat.get("etape"), resultat.get("etape"))
+        if run_archive(resultat):
+            return (f"{etape} a plante : {resultat.get('erreur')}. Ce run est archive (un run plus recent a "
+                    "remplace output/) : regle le probleme, puis « Relancer comme nouveau projet » "
+                    "(onglet « Runs existants »).")
         return (f"{etape} a plante : {resultat.get('erreur')}. Regle le probleme, puis clique sur Relancer "
                 "(onglet « Runs existants ») : les etapes reussies ne sont pas refaites.")
     etats = etats_des_etapes(resultat)
@@ -1021,45 +1054,45 @@ def _resume_etape(libelle, resultat) -> str:
             return " · ".join(s.split(" (")[0] for s in archi.stack_technique[:4]) + f" · {len(archi.structure_modules)} modules"
         if libelle == "Test Agent":
             plan = resultat["plan_tests"]
-            revision = " · revises une fois" if resultat.get("tests_revises") else ""
+            revision = " · révisés une fois" if resultat.get("tests_revises") else ""
             return f"{len(plan.cas)} cas de test · {len(plan.fichiers_tests)} fichiers{revision}"
         if libelle == "Developer":
-            return f"{len(resultat['sortie_dev'].fichiers_generes)} fichiers generes"
+            return f"{len(resultat['sortie_dev'].fichiers_generes)} fichiers générés"
         if libelle == "QA Backend":
             r = resultat["rapport_backend"]
             return f"{r.tests_passes}/{r.tests_passes + r.tests_echoues} tests · couverture {r.couverture_pct:.1f} %"
         if libelle == "Frontend":
-            return f"{len(resultat['sortie_frontend'].fichiers_generes)} fichiers generes"
+            return f"{len(resultat['sortie_frontend'].fichiers_generes)} fichiers générés"
         if libelle == "QA Frontend":
             r = resultat["rapport_frontend"]
-            return f"{len(r.fichiers_verifies)} fichiers verifies" + (f" · {len(r.erreurs)} erreur(s)" if r.erreurs else "")
+            return f"{len(r.fichiers_verifies)} fichiers vérifiés" + (f" · {len(r.erreurs)} erreur(s)" if r.erreurs else "")
         if libelle == "Dockerization":
             return f"{len(resultat['rapport_dockerisation'].fichiers_generes)} fichiers (Dockerfile, docker-compose…)"
         if libelle == "Validation Docker":
             r = resultat["rapport_validation_docker"]
             if not r.docker_disponible:
-                return "non effectuee : Docker non joignable"
-            return " · ".join(f"{e.nom} {'OK' if e.succes else 'ECHEC'}" for e in r.etapes) or "OK"
+                return "non effectuée : Docker non joignable"
+            return " · ".join(f"{e.nom} {'OK' if e.succes else 'ÉCHEC'}" for e in r.etapes) or "OK"
         if libelle == "Agent E2E":
             plan = resultat["plan_e2e"]
             if not plan.active:
-                return "non effectue : desactive ou Docker non joignable"
+                return "non effectué : désactivé ou Docker non joignable"
             n_api = sum(1 for s in plan.scenarios if s.type == "api")
-            return f"{len(plan.scenarios)} scenarios · {n_api} API, {len(plan.scenarios) - n_api} interface"
+            return f"{len(plan.scenarios)} scénarios · {n_api} API, {len(plan.scenarios) - n_api} interface"
         if libelle == "Tests E2E":
             r = resultat["rapport_e2e"]
             if not r.docker_disponible:
-                return "non effectues : " + " ".join(r.erreurs)
+                return "non effectués : " + " ".join(r.erreurs)
             echecs = ", ".join(e.id for e in r.echecs)
-            texte = f"{r.reussis}/{r.total} scenarios reussis" + (f" · en echec : {echecs}" if echecs else "")
+            texte = f"{r.reussis}/{r.total} scénarios réussis" + (f" · en échec : {echecs}" if echecs else "")
             ignores = getattr(r, "ignores", None) or []
             if ignores:
-                texte += " · non verifie(s) : " + ", ".join(e.id for e in ignores)
+                texte += " · non vérifié(s) : " + ", ".join(e.id for e in ignores)
             if getattr(r, "captures", None):
-                texte += f" · {len(r.captures)} capture(s) et video(s)"
+                texte += f" · {len(r.captures)} capture(s) et vidéo(s)"
             essais = resultat.get("tentative_e2e", 1)
             if essais > 1:
-                texte += f" · corriges en {essais} essais" if r.succes else f" · apres {essais} essais"
+                texte += f" · corrigés en {essais} essais" if r.succes else f" · après {essais} essais"
             historique = getattr(r, "essais", None) or []
             if len(historique) > 1:
                 texte += f" · premier essai : {historique[0].reussis}/{historique[0].total}"
@@ -1085,7 +1118,16 @@ def _puce(texte, fond, couleur, taille=12):
             f'font-weight:700;font-size:{taille}px">{_e(texte)}</span>')
 
 
+def ancre_etape(libelle) -> str:
+    """Id HTML de la carte d'une etape (la barre d'etapes y renvoie)."""
+    return "etape-" + re.sub(r"[^a-z0-9]+", "-", _sans_accents(libelle)).strip("-")
+
+
 def _cartes(resultat, en_cours) -> str:
+    """Une carte par etape, l'une sous l'autre. Une etape qui a un detail (user
+    stories, plan de test, scenarios, erreurs...) s'ouvre d'un clic et le montre
+    juste en dessous ; une etape en echec ou a verifier s'ouvre toute seule."""
+    blocs = _blocs_par_etape(resultat) if resultat else []
     cartes = []
     for libelle, etat, detail in etats_des_etapes(resultat):
         fond, bord, couleur, icone = STYLE_CARTE[etat]
@@ -1099,12 +1141,27 @@ def _cartes(resultat, en_cours) -> str:
             ligne = _resume_etape(libelle, resultat)
         else:
             ligne = "en attente" if en_cours else "non atteint"
+        entete = (f'<div style="flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 14px">'
+                  f'<span style="font-weight:700;font-size:15px;color:{couleur};min-width:170px">{icone}{_e(libelle)}</span>'
+                  f'<span style="font-size:13.5px;color:#374151;overflow-wrap:anywhere">{_e(ligne)}</span></div>')
+        cadre = (f'border:1px solid #E5E7EB;border-left:5px solid {bord};border-radius:10px;background:{fond};'
+                 f'scroll-margin-top:12px')
+        sections = [b for b in blocs if b[0] == libelle]
+        if not sections:
+            cartes.append(f'<div id="{ancre_etape(libelle)}" style="{cadre};padding:7px 14px;display:flex">{entete}</div>')
+            continue
+        contenu = "".join(
+            f'<div style="margin-top:12px"><div style="font-weight:700;font-size:14px;color:#111827;margin-bottom:6px">'
+            f'{_e(titre)} <span style="color:#6B7280;font-weight:400">({n})</span></div>{corps}</div>'
+            for _, titre, n, corps in sections)
+        ouverte = " open" if etat in ("ko", "attention") else ""
         cartes.append(
-            f'<div style="border:1px solid #E5E7EB;border-left:5px solid {bord};border-radius:10px;'
-            f'padding:9px 12px;background:{fond}"><div style="font-weight:700;font-size:14px;color:{couleur}">'
-            f'{icone}{_e(libelle)}</div><div style="font-size:12.5px;color:#4B5563;margin-top:3px">{_e(ligne)}</div></div>')
-    return ('<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px">'
-            + "".join(cartes) + "</div>")
+            f'<details id="{ancre_etape(libelle)}" data-cle="etape:{_e(libelle)}"{ouverte} style="{cadre};padding:0">'
+            f'<summary style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:12px;'
+            f'padding:7px 14px">{entete}<span style="flex:none;font-size:13px;color:#4338CA;font-weight:600">'
+            f'Voir le détail ▾</span></summary><div style="padding:0 14px 14px;border-top:1px solid #E5E7EB">'
+            f'{contenu}</div></details>')
+    return '<div style="display:flex;flex-direction:column;gap:6px">' + "".join(cartes) + "</div>"
 
 
 def _chiffres(resultat) -> str:
@@ -1114,10 +1171,10 @@ def _chiffres(resultat) -> str:
     terminees = sum(1 for _, etat, _ in etats_des_etapes(resultat) if etat == "ok")
     valeurs = [
         (len(us.user_stories) if us else "—", "user stories"),
-        (len(plan.cas) if plan else "—", "cas de test (ecrits avant le code)"),
-        (f"{qa.tests_passes}/{qa.tests_passes + qa.tests_echoues}" if qa else "—", "tests reussis"),
+        (len(plan.cas) if plan else "—", "cas de test (écrits avant le code)"),
+        (f"{qa.tests_passes}/{qa.tests_passes + qa.tests_echoues}" if qa else "—", "tests réussis"),
         (f"{qa.couverture_pct:.0f} %" if qa else "—", "couverture du code"),
-        (f"{terminees}/{len(ETAPES_BARRE)}", "etapes terminees"),
+        (f"{terminees}/{len(ETAPES_BARRE)}", "étapes terminées"),
     ]
     return ('<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:12px 0">'
             + "".join(f'<div style="border:1px solid #E5E7EB;border-radius:10px;padding:8px 12px;background:#FFFFFF">'
@@ -1126,55 +1183,78 @@ def _chiffres(resultat) -> str:
             + "</div>")
 
 
-def _miniature(chemin, taille: int = 480) -> str:
-    """Capture reduite (JPEG en base64) pour l'afficher dans la page, ou "" si illisible."""
-    try:
-        import base64
-        import io
-        from PIL import Image
-        with Image.open(chemin) as image:
-            image = image.convert("RGB")
-            image.thumbnail((taille, taille))
-            tampon = io.BytesIO()
-            image.save(tampon, "JPEG", quality=70)
-        return "data:image/jpeg;base64," + base64.b64encode(tampon.getvalue()).decode()
-    except Exception:
-        return ""
+def chemin_capture(chemin, resultat) -> Path | None:
+    """Ou est vraiment une capture du run : les chemins du rapport commencent par
+    output/ ; une fois le run archive, ses fichiers sont dans archives/<id du run>/."""
+    if not chemin:
+        return None
+    sortie = Path(resultat.get("dossier_docker", "output")).as_posix().rstrip("/") + "/"
+    chemin = Path(chemin).as_posix()
+    if chemin.startswith(sortie):
+        dossier = _dossier_du_run_ou_archive(resultat)
+        if dossier is None:
+            return None
+        chemin = (dossier / chemin[len(sortie):]).as_posix()
+    fichier = Path(chemin)
+    return fichier if fichier.is_file() else None
+
+
+def _nom_etape_capture(chemin) -> str:
+    return Path(chemin).stem.split("-", 1)[-1].replace("_", " ")
+
+
+def galerie_du_run(resultat):
+    """Galerie « Captures et videos E2E » du run choisi : un clic agrandit une image,
+    les fleches passent a la suivante, les videos se lisent sur place. Seuls ces
+    fichiers sont envoyes au navigateur, jamais le reste du dossier (.env...)."""
+    captures = getattr((resultat or {}).get("rapport_e2e"), "captures", None) or []
+    elements = []
+    if resultat and not resultat.get("_en_cours"):
+        for capture in captures:
+            for etape in getattr(capture, "etapes", []) or []:
+                fichier = chemin_capture(etape, resultat)
+                if fichier:
+                    elements.append((str(fichier), f"{capture.id} · {_nom_etape_capture(etape)}"))
+            for chemin, legende in ((capture.image, "capture de fin"), (capture.video, "vidéo")):
+                fichier = chemin_capture(chemin, resultat)
+                if fichier:
+                    elements.append((str(fichier), f"{capture.id} · {legende}"))
+    return gr.update(value=elements or None, visible=bool(elements))
 
 
 def _bloc_captures(resultat):
-    """Captures et videos des scenarios d'interface (miniatures seulement quand le run est fini)."""
+    """Sous « Tests E2E » : la liste des scenarios d'interface et de leurs etapes
+    capturees. Les images et les videos elles-memes sont dans la galerie (onglet
+    « Runs existants »), pour ne pas les montrer deux fois."""
     captures = getattr(resultat.get("rapport_e2e"), "captures", None) or []
     if not captures:
         return None
-    afficher = not resultat.get("_en_cours")
-    cartes = []
-    for capture in captures[:20]:
-        source = _miniature(capture.image) if afficher and capture.image else ""
-        image = (f'<img src="{source}" style="width:100%;border:1px solid #E5E7EB;border-radius:6px;margin-top:4px">'
-                 if source else "")
-        etapes = ""
-        for chemin in getattr(capture, "etapes", [])[:8]:
-            nom = Path(chemin).stem.split("-", 1)[-1].replace("_", " ")
-            mini = _miniature(chemin, 240) if afficher else ""
-            etapes += (f'<div style="width:112px;font-size:11px;color:#374151">'
-                       + (f'<img src="{mini}" style="width:100%;border:1px solid #E5E7EB;border-radius:4px">'
-                          if mini else "") + f"{_e(nom)}</div>")
-        if etapes:
-            etapes = f'<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">{etapes}</div>'
-        fichiers = " · ".join(_e(f) for f in (capture.image, capture.video) if f)
-        cartes.append(f'<div style="width:240px"><b>{_e(capture.id)}</b>{image}{etapes}'
-                      f'<div style="font-size:11px;color:#6B7280;word-break:break-all">{fichiers}</div></div>')
-    entete = ('<div style="font-size:13px;margin-bottom:8px">Capture de fin, captures des etapes cles et video '
-              "(.webm, a ouvrir avec Chrome) de chaque scenario d'interface, dans les dossiers e2e/captures "
-              "et e2e/etapes de l'application. "
-              "Fermer l'explorateur avant un nouveau run.</div>")
+    style_td = 'style="padding:6px;border-bottom:1px solid #F1F5F9;vertical-align:top"'
+    lignes = ""
+    for capture in captures:
+        etapes = [_nom_etape_capture(c) for c in getattr(capture, "etapes", []) or []]
+        preuves = " · ".join(t for t, f in (("capture de fin", capture.image), ("vidéo", capture.video)) if f)
+        lignes += (f"<tr><td {style_td}><b>{_e(capture.id)}</b></td><td {style_td}>{_e(', '.join(etapes)) or '—'}</td>"
+                   f"<td {style_td}>{_e(preuves) or '—'}</td></tr>")
+    entete = ('<div style="font-size:13px;margin-bottom:8px">Pour voir les images en grand et lire les vidéos : '
+              "<b>la galerie sous le run, dans l'onglet « Runs existants »</b>. Les fichiers sont dans e2e/captures "
+              "et e2e/etapes de l'application (fermer l'explorateur avant un nouveau run).</div>")
     return ("Captures et videos des scenarios d'interface", len(captures),
-            entete + f'<div style="display:flex;flex-wrap:wrap;gap:12px">{"".join(cartes)}</div>')
+            entete + '<table style="width:100%;border-collapse:collapse;font-size:13px;color:#111827">'
+            '<tr><th style="text-align:left;padding:6px;color:#6B7280">Scénario</th>'
+            '<th style="text-align:left;padding:6px;color:#6B7280">Étapes capturées</th>'
+            '<th style="text-align:left;padding:6px;color:#6B7280">Preuves</th></tr>' + lignes + "</table>")
 
 
-def _details(resultat) -> str:
-    """Le detail, replie : user stories, plan de test, architecture, erreurs."""
+# Titre des erreurs, par etape (sous la carte de l'etape) et toutes ensemble (_details)
+TITRE_ERREURS_ETAPE = "Erreurs trouvees par le controle"
+TITRE_ERREURS = "Erreurs trouvees par les controles"
+
+
+def _blocs_par_etape(resultat) -> list[tuple[str, str, int, str]]:
+    """Le detail de chaque etape : (etape, titre, nombre, contenu HTML). Il s'affiche
+    sous la carte de son etape (user stories sous Product Owner, plan de test sous
+    Test Agent...) au lieu d'etre regroupe en bas de la page."""
     blocs = []
     style_table = 'style="width:100%;border-collapse:collapse;font-size:13px;color:#111827"'
     style_th = 'style="text-align:left;padding:6px;border-bottom:1px solid #E5E7EB;color:#6B7280"'
@@ -1185,7 +1265,7 @@ def _details(resultat) -> str:
             f"<tr><td {style_td}>{_e(s.id)}</td><td {style_td}>{_e(s.titre)}</td>"
             f"<td {style_td}>{_puce(s.priorite, *COULEURS_PRIORITE.get(s.priorite, ('#F1F5F9', '#475569')))}</td>"
             f"<td {style_td}>{len(s.criteres_acceptation)}</td></tr>" for s in us.user_stories)
-        blocs.append(("User stories", len(us.user_stories),
+        blocs.append(("Product Owner", "User stories", len(us.user_stories),
                       f"<table {style_table}><tr><th {style_th}>ID</th><th {style_th}>User story</th>"
                       f"<th {style_th}>Priorite</th><th {style_th}>Criteres</th></tr>{lignes}</table>"))
     plan = resultat.get("plan_tests")
@@ -1194,13 +1274,13 @@ def _details(resultat) -> str:
             f"<tr><td {style_td}>{_e(c.id)}</td><td {style_td}>{_e(c.user_story)}</td>"
             f"<td {style_td}><code>{_e(c.methode)} {_e(c.route)}</code></td><td {style_td}>{_e(c.code_attendu)}</td>"
             f"<td {style_td}>{_e(c.scenario)}</td></tr>" for c in plan.cas)
-        blocs.append(("Plan de test du Test Agent", len(plan.cas),
+        blocs.append(("Test Agent", "Plan de test du Test Agent", len(plan.cas),
                       f"<table {style_table}><tr><th {style_th}>Cas</th><th {style_th}>US</th><th {style_th}>Requete</th>"
                       f"<th {style_th}>Code attendu</th><th {style_th}>Scenario</th></tr>{lignes}</table>"))
     archi = resultat.get("architecture")
     if archi:
         modules = "".join(f"<li>{_e(m)}</li>" for m in archi.structure_modules)
-        blocs.append(("Architecture", len(archi.structure_modules),
+        blocs.append(("Architect", "Architecture", len(archi.structure_modules),
                       f'<div style="font-size:13px;color:#111827"><b>Stack :</b> {_e(", ".join(archi.stack_technique))}'
                       f'<ul style="margin:6px 0 0 18px">{modules}</ul></div>'))
     plan_e2e = resultat.get("plan_e2e")
@@ -1214,7 +1294,7 @@ def _details(resultat) -> str:
             f"<td {style_td}>{_e(s.description)}</td><td {style_td}>"
             f"{('✗ echec' if s.id in en_echec else '○ non verifie' if s.id in ignores else '✓ OK') if joues else '—'}"
             f"</td></tr>" for s in plan_e2e.scenarios)
-        blocs.append(("Scenarios E2E (Agent E2E)", len(plan_e2e.scenarios),
+        blocs.append(("Agent E2E", "Scenarios E2E (Agent E2E)", len(plan_e2e.scenarios),
                       f"<table {style_table}><tr><th {style_th}>ID</th><th {style_th}>Type</th><th {style_th}>US</th>"
                       f"<th {style_th}>Scenario</th><th {style_th}>Resultat</th></tr>{lignes}</table>"))
     historique = getattr(resultat.get("rapport_e2e"), "essais", None) or []
@@ -1228,30 +1308,73 @@ def _details(resultat) -> str:
                 lignes += (f"<tr><td {style_td}>{essai.numero}</td><td {style_td}>{essai.reussis}/{essai.total}</td>"
                            f"<td {style_td}>{_e(echec.id)} ({_e(echec.type)})</td><td {style_td}>{_e(echec.cause)}</td>"
                            f"<td {style_td}><code style=\"white-space:pre-wrap\">{_e(echec.message)}</code></td></tr>")
-        blocs.append(("Essais des Tests E2E (erreurs et corrections)", len(historique),
+        blocs.append(("Tests E2E", "Essais des Tests E2E (erreurs et corrections)", len(historique),
                       f"<table {style_table}><tr><th {style_th}>Essai</th><th {style_th}>Reussis</th>"
                       f"<th {style_th}>Scenario</th><th {style_th}>Corrige par</th><th {style_th}>Erreur</th>"
                       f"</tr>{lignes}</table>"))
+    def _fichiers(etape, titre, fichiers):
+        if fichiers:
+            items = "".join(f"<li><code>{_e(f)}</code></li>" for f in fichiers[:200])
+            blocs.append((etape, titre, len(fichiers),
+                          f'<ul style="margin:0 0 0 18px;font-size:13px;columns:2 260px">{items}</ul>'))
+    _fichiers("Developer", "Fichiers générés", getattr(resultat.get("sortie_dev"), "fichiers_generes", None))
+    qa = resultat.get("rapport_backend")
+    if qa is not None:
+        blocs.append(("QA Backend", "Résultat de pytest", qa.tests_passes + qa.tests_echoues,
+                      f'<div style="font-size:13.5px">{qa.tests_passes} réussi(s), {qa.tests_echoues} en échec, '
+                      f'couverture du code {qa.couverture_pct:.1f} %.</div>'))
+    _fichiers("Frontend", "Fichiers générés", getattr(resultat.get("sortie_frontend"), "fichiers_generes", None))
+    _fichiers("QA Frontend", "Fichiers vérifiés", getattr(resultat.get("rapport_frontend"), "fichiers_verifies", None))
+    _fichiers("Dockerization", "Fichiers Docker", getattr(resultat.get("rapport_dockerisation"), "fichiers_generes", None))
+    validation = resultat.get("rapport_validation_docker")
+    if validation is not None and validation.etapes:
+        lignes = "".join(
+            f"<tr><td {style_td}>{_e(e.nom)}</td><td {style_td}>{'✓ OK' if e.succes else '✗ ÉCHEC'}</td>"
+            f"<td {style_td}>{_e(e.details)}</td></tr>" for e in validation.etapes)
+        blocs.append(("Validation Docker", "Contrôles", len(validation.etapes),
+                      f"<table {style_table}><tr><th {style_th}>Contrôle</th><th {style_th}>Résultat</th>"
+                      f"<th {style_th}>Détail</th></tr>{lignes}</table>"))
     bloc_captures = _bloc_captures(resultat)
     if bloc_captures:
-        blocs.append(bloc_captures)
-    erreurs = []
-    for cle in ("rapport_backend", "rapport_frontend", "rapport_validation_docker"):
-        rapport = resultat.get(cle)
-        if rapport is not None and not rapport.succes:
-            erreurs += [str(err) for err in rapport.erreurs]
+        blocs.append(("Tests E2E", *bloc_captures))
+    controles = [("QA Backend", resultat.get("rapport_backend")), ("QA Frontend", resultat.get("rapport_frontend")),
+                 ("Validation Docker", resultat.get("rapport_validation_docker"))]
     rapport_e2e = resultat.get("rapport_e2e")
-    if rapport_e2e is not None and rapport_e2e.docker_disponible and not rapport_e2e.succes:
-        erreurs += [str(err) for err in rapport_e2e.erreurs]
+    if rapport_e2e is not None and rapport_e2e.docker_disponible:
+        controles.append(("Tests E2E", rapport_e2e))
+    for etape, rapport in controles:
+        if rapport is not None and not rapport.succes and rapport.erreurs:
+            erreurs = [str(err) for err in rapport.erreurs]
+            blocs.append((etape, TITRE_ERREURS_ETAPE, len(erreurs), _liste_erreurs(erreurs)))
+    return blocs
+
+
+def _liste_erreurs(erreurs) -> str:
+    items = "".join(f'<li style="margin-bottom:4px"><pre style="white-space:pre-wrap;margin:0;font-size:12px">{_e(err[:1500])}</pre></li>'
+                    for err in erreurs[:10])
+    return f'<ul style="margin:0 0 0 18px;color:#991B1B">{items}</ul>'
+
+
+def _section(titre, n, contenu) -> str:
+    return (f'<details style="margin-top:8px;border:1px solid #E5E7EB;border-radius:10px;padding:8px 12px;background:#FFFFFF">'
+            f'<summary style="cursor:pointer;font-weight:700;font-size:14px;color:#111827">{_e(titre)} '
+            f'<span style="color:#6B7280;font-weight:400">({n})</span></summary>'
+            f'<div style="margin-top:8px">{contenu}</div></details>')
+
+
+def _details(resultat) -> str:
+    """Tout le detail d'un run, replie, section par section (les erreurs de tous les
+    controles ensemble). La vue du run, elle, range chaque section sous son etape."""
+    blocs = _blocs_par_etape(resultat)
+    sections = [_section(titre, n, contenu) for _, titre, n, contenu in blocs if titre != TITRE_ERREURS_ETAPE]
+    erreurs = []
+    for _, titre, _, contenu in blocs:
+        if titre == TITRE_ERREURS_ETAPE:
+            erreurs.append(contenu)
     if erreurs:
-        items = "".join(f'<li style="margin-bottom:4px"><pre style="white-space:pre-wrap;margin:0;font-size:12px">{_e(err[:1500])}</pre></li>'
-                        for err in erreurs[:10])
-        blocs.append(("Erreurs trouvees par les controles", len(erreurs), f'<ul style="margin:0 0 0 18px;color:#991B1B">{items}</ul>'))
-    return "".join(
-        f'<details style="margin-top:8px;border:1px solid #E5E7EB;border-radius:10px;padding:8px 12px;background:#FFFFFF">'
-        f'<summary style="cursor:pointer;font-weight:700;font-size:14px;color:#111827">{_e(titre)} '
-        f'<span style="color:#6B7280;font-weight:400">({n})</span></summary>'
-        f'<div style="margin-top:8px">{contenu}</div></details>' for titre, n, contenu in blocs)
+        nombre = sum(n for _, titre, n, _ in blocs if titre == TITRE_ERREURS_ETAPE)
+        sections.append(_section(TITRE_ERREURS, nombre, "".join(erreurs)))
+    return "".join(sections)
 
 
 def _puces_etapes(resultat) -> str:
@@ -1260,9 +1383,9 @@ def _puces_etapes(resultat) -> str:
         fond, bord, texte, icone = STYLES_ETAT[etat]
         suffixe = f" · {detail}" if detail else ""
         puces.append(
-            f'<span style="display:inline-block;margin:3px 0;padding:5px 9px;border-radius:8px;'
-            f'border:1.5px solid {bord};background:{fond};color:{texte};font-weight:600;font-size:12.5px">'
-            f"{icone}{_e(libelle)}{_e(suffixe)}</span>")
+            f'<a href="#{ancre_etape(libelle)}" style="display:inline-block;margin:3px 0;padding:5px 9px;'
+            f'border-radius:8px;border:1.5px solid {bord};background:{fond};color:{texte};font-weight:600;'
+            f'font-size:12.5px;text-decoration:none">{icone}{_e(libelle)}{_e(suffixe)}</a>')
     return '<span style="color:#9CA3AF;margin:0 3px">→</span>'.join(puces)
 
 
@@ -1291,8 +1414,11 @@ def vue_run(resultat, avec_chrono=False) -> str:
         f'<div style="margin-top:10px">{_puces_etapes(resultat)}</div>'
         f'<div style="margin-top:10px;font-size:13.5px;color:{couleur_message};background:{fond_message};'
         f'border-radius:8px;padding:8px 12px"><b>{titre_message} :</b> {_e(message_en_ce_moment(resultat))}</div>'
-        f"</div>{_chiffres(resultat)}{_cartes(resultat, en_cours)}"
-        f'<div style="margin-top:10px">{liens_application(resultat)}</div>{_details(resultat)}')
+        f"</div>{_chiffres(resultat)}"
+        '<div style="font-size:13px;color:#4B5563;margin:4px 0 8px">Clique sur une étape pour voir son détail '
+        'juste en dessous (user stories, plan de test, fichiers, scénarios, erreurs…).</div>'
+        f"{_cartes(resultat, en_cours)}"
+        f'<div style="margin-top:10px">{liens_application(resultat)}</div>')
 
 
 def alerte_depuis_texte(texte) -> str:
@@ -1341,20 +1467,110 @@ def _etape_du_choix(choix) -> str:
 
 def libelle_relancer(choix):
     etape = _etape_du_choix(choix)
-    return gr.update(value=f"Relancer a partir de « {etape} »" if etape else "Relancer")
+    return gr.update(value=f"Relancer à partir de « {etape} »" if etape else "Relancer")
+
+
+# Echec d'un controle apres toutes les corrections : on repart de l'agent qui
+# produit ce que le controle juge (apres avoir modifie ses regles)
+ETAPE_A_REFAIRE_APRES_ECHEC = {"backend": "Developer", "frontend": "Frontend", "docker": "Dockerization",
+                               "e2e": "Tests E2E"}
+
+
+def run_archive(resultat) -> bool:
+    """Les fichiers du run ont ete deplaces dans archives/ par un run plus recent :
+    le relancer ecrirait dans le output/ d'un autre projet."""
+    return bool(resultat and resultat.get("id_run")) and _fichiers_du_run(resultat) is None
+
+
+def _etape_proposee(choix, resultat) -> str:
+    """Choix propose par defaut : la ou il s'est arrete s'il a plante ; sinon
+    l'etape a refaire, pas le Product Owner (qui refait tout le run)."""
+    if choix[0].startswith(REPRISE) or not resultat:
+        return choix[0]
+    statut = statut_du_run(resultat)
+    if statut == "SUCCES PARTIEL" and "Validation Docker" in choix:
+        return "Validation Docker"  # repartir la ou Docker n'etait pas joignable
+    if statut == "ECHEC":
+        etape = ETAPE_A_REFAIRE_APRES_ECHEC.get(str(resultat.get("etape", "")).split(" ")[0])
+        if etape in choix:
+            return etape
+    if statut == "SUCCES" and getattr(resultat.get("rapport_e2e"), "echecs", None) and "Tests E2E" in choix:
+        return "Tests E2E"  # scenarios encore KO : on les rejoue (ex : apres avoir ajoute une cle)
+    return choix[0]
 
 
 def relance_pour(id_run, resultat):
     """Liste et bouton « Relancer » pour le run choisi (bouton grise pendant
-    un run). Sorties : liste, bouton."""
+    un run, caches si le run est archive). Sorties : liste, bouton."""
     choix = choix_de_relance(id_run)
-    premier = choix[0]
-    if statut_du_run(resultat) == "SUCCES PARTIEL" and "Validation Docker" in choix:
-        premier = "Validation Docker"  # repartir la ou Docker n'etait pas joignable
+    premier = _etape_proposee(choix, resultat)
     etape = _etape_du_choix(premier)
     occupe = run_en_cours() or bool(resultat and resultat.get("_en_cours"))
-    return (gr.update(choices=choix, value=premier),
-            gr.update(value=f"Relancer a partir de « {etape} »", interactive=not occupe))
+    visible = not run_archive(resultat)
+    return (gr.update(choices=choix, value=premier, visible=visible),
+            gr.update(value=f"Relancer à partir de « {etape} »", interactive=not occupe, visible=visible))
+
+
+def _encadre(titre, texte, fond, bord, couleur, commande="") -> str:
+    bloc_commande = (f'<code style="display:block;margin-top:8px;padding:8px 10px;background:#FFFFFF;'
+                     f'border-radius:6px;font-size:13px;overflow-wrap:anywhere">{_e(commande)}</code>'
+                     if commande else "")
+    return (f'<div style="border:1px solid {bord};background:{fond};color:{couleur};border-radius:10px;'
+            f'padding:12px 14px;font-size:15px;line-height:1.5"><strong>{_e(titre)}</strong> {_e(texte)}'
+            f'{bloc_commande}</div>')
+
+
+def panneau_du_run(id_run, resultat) -> str:
+    """Ce qu'on peut faire avec le run choisi, en clair : dernier run, run archive,
+    echec, plantage... (affiche au-dessus de « Relancer »)."""
+    if not id_run or not resultat:
+        return ""
+    statut = statut_du_run(resultat)
+    if statut == "EN COURS":
+        return _encadre("Run en cours.", "Suivez-le dans l'onglet « Run en cours ».",
+                        "#FFF7ED", "#FDBA74", "#7C2D12")
+    if run_archive(resultat):
+        commande = f"cd archives/{id_run} ; docker compose -p {id_run} up -d"
+        if statut.startswith("SUCCES"):
+            return _encadre("Run réussi, archivé.",
+                            "Un run plus récent a remplacé output/. Ses fichiers restent téléchargeables, "
+                            "mais il ne peut plus être relancé ici. Pour revoir son application :",
+                            "#F3F4F6", "#D1D5DB", "#1F2937", commande)
+        return _encadre(f"{statut.capitalize()} à « {ETAPES_ECHEC_LISIBLES.get(resultat.get('etape'), LIBELLES_NOEUDS.get(resultat.get('etape'), resultat.get('etape')))} », archivé.",
+                        "Un run plus récent a remplacé output/ : ce run ne peut plus être repris. "
+                        "Corrigez la cause (règle de l'agent, clé, machine), puis « Relancer comme "
+                        "nouveau projet ».", "#FEF2F2", "#FCA5A5", "#7F1D1D")
+    if statut == "SUCCES":
+        echecs = getattr(resultat.get("rapport_e2e"), "echecs", None) or []
+        if echecs:
+            rapport = resultat["rapport_e2e"]
+            return _encadre("Dernier run, ses fichiers sont dans output/.",
+                            f"Tests E2E : {rapport.reussis}/{rapport.total}, en échec : "
+                            f"{', '.join(e.id for e in echecs)}. Corrigez la cause, puis relancez à partir "
+                            "de « Tests E2E » : le code n'est pas refait.", "#FFFBEB", "#FCD34D", "#78350F")
+        return _encadre("Dernier run, ses fichiers sont dans output/.",
+                        "Tout est réussi. Relancez seulement après avoir modifié un agent.",
+                        "#ECFDF5", "#6EE7B7", "#065F46")
+    return _encadre("Dernier run.", message_en_ce_moment(resultat), "#FFFBEB", "#FCD34D", "#78350F")
+
+
+def bouton_nouveau_projet_pour(resultat):
+    """« Relancer comme nouveau projet » : pour un run archive qui n'a pas reussi."""
+    return gr.update(visible=run_archive(resultat) and not statut_du_run(resultat).startswith("SUCCES")
+                     and bool(resultat.get("besoin")))
+
+
+def preremplir_depuis_run(id_run):
+    """Clic sur « Relancer comme nouveau projet » : le formulaire reprend la demande
+    du run choisi, et l'onglet « Nouveau projet » s'ouvre.
+    Sorties : titre, description, utilisateurs, fonctionnalites, organisation, onglets."""
+    besoin = etat_du_run((id_run or "").strip()).get("besoin")
+    if besoin is None:
+        return (gr.update(),) * 5 + (gr.update(),)
+    donnees = besoin.model_dump() if hasattr(besoin, "model_dump") else dict(besoin)
+    return (donnees.get("titre_projet", ""), donnees.get("description", ""),
+            donnees.get("utilisateurs_cibles", ""), ", ".join(donnees.get("fonctionnalites_cles") or []),
+            donnees.get("structure_projet", ""), gr.Tabs(selected="nouveau"))
 
 
 # Etape d'ou repart chaque relance (pour l'affichage du debut de la relance)
@@ -1378,21 +1594,23 @@ def relancer_pipeline(id_run, choix, sections_choisies):
 
 
 def texte_id(id_run) -> str:
-    return f"ID : {id_run}" if id_run else "ID : —"
+    return id_run or ""
 
 
 def choisir_run(ids, evt: gr.SelectData):
     """Clic sur une ligne de l'historique : ce run s'affiche en dessous.
-    Sorties : id_run, texte de l'ID, vue du run, liens, plan, liste et bouton Relancer."""
+    Sorties : id_run, texte de l'ID, vue du run, liens, plan, liste et bouton Relancer,
+    4 boutons Telecharger, panneau « que faire », bouton « Relancer comme nouveau projet »."""
     ligne = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
     if ligne is None or ligne >= len(ids):
-        return (gr.update(),) * 11
+        return (gr.update(),) * 14
     id_run = ids[ligne]
     resultat = etat_du_run(id_run)
     if _est_le_run_qui_tourne(id_run):
         resultat = dict(resultat, _en_cours="en_cours")  # pas encore fini : EN COURS
     return (id_run, texte_id(id_run), vue_run(resultat), liens_application(resultat),
-            plan_de_test_du_run(resultat), *relance_pour(id_run, resultat), *fichiers_du_run(resultat))
+            plan_de_test_du_run(resultat), *relance_pour(id_run, resultat), *fichiers_du_run(resultat),
+            panneau_du_run(id_run, resultat), bouton_nouveau_projet_pour(resultat), galerie_du_run(resultat))
 
 
 # « Runs existants » : le resultat d'un run s'affiche quand on clique sur sa ligne
@@ -1406,11 +1624,12 @@ def charger_page():
     """Ouverture de la page : l'historique. Aucun run n'est choisi : son
     resultat s'affiche quand on clique sur sa ligne.
     Sorties : tableau, ids, id_run, texte de l'ID, etat, vue choisie, liens,
-    plan, liste et bouton Relancer."""
+    plan, liste et bouton Relancer, 4 boutons Telecharger, panneau, bouton nouveau projet."""
     lignes, ids = runs_pour_tableau()
-    return (tableau_runs(lignes), ids, gr.update(), "ID : —", gr.update(), VUE_CHOISIR_UN_RUN, "",
-            gr.update(visible=False), gr.update(),
-            gr.update(value=TEXTE_AUCUN_RUN_CHOISI, interactive=False), *fichiers_du_run(None))
+    return (tableau_runs(lignes), ids, gr.update(), "", gr.update(), VUE_CHOISIR_UN_RUN, "",
+            gr.update(visible=False), gr.update(visible=True),
+            gr.update(value=TEXTE_AUCUN_RUN_CHOISI, interactive=False, visible=True), *fichiers_du_run(None),
+            "", gr.update(visible=False), gr.update(value=None, visible=False))
 
 
 def _etat_pour_le_suivi(resultat):
@@ -1762,11 +1981,11 @@ def rafraichir_suivi(resultat):
     return gr.update(), gr.update(label="Run en cours")
 
 
-def apres_changement_du_run(resultat):
+def apres_changement_du_run(resultat, filtre="Tous", recherche=""):
     """Fin ou progression du run suivi : l'historique est remis a jour. A la
     fin du run, il devient le run choisi dans « Runs existants ».
     Sorties : tableau, ids, liste et bouton Relancer, texte de l'ID, vue choisie."""
-    lignes, ids = runs_pour_tableau()
+    lignes, ids = runs_pour_tableau(filtre, recherche)
     if resultat and not resultat.get("_en_cours") and not run_en_cours():
         id_fini = resultat.get("id_run")
         return (tableau_runs(lignes), ids, *relance_pour(id_fini, resultat), texte_id(id_fini), vue_run(resultat))
@@ -1825,38 +2044,51 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
                 resultat_texte = gr.Textbox(show_label=False, lines=22)
 
         with gr.Tab("Runs existants", id="runs"):
+            gr.Markdown("Choisis un run dans la liste : ce que tu peux en faire s'affiche à droite.")
             with gr.Row(equal_height=False):
                 with gr.Column(scale=11, elem_classes="carte"):
+                    with gr.Row(equal_height=True):
+                        recherche_runs = gr.Textbox(label="Rechercher un projet", placeholder="ex : Stock du labo",
+                                                    scale=3)
+                        bouton_actualiser = gr.Button("Actualiser la liste", size="sm", scale=1)
+                    filtre_runs = gr.Radio(choices=list(FILTRES_RUNS), value="Tous", label="Filtrer par résultat")
                     table_runs = gr.Dataframe(
                         headers=COLONNES_HISTORIQUE, datatype=["str", "str", "html", "str"],
                         interactive=False, wrap=True, elem_classes="table-runs",
-                        label="Choisis un run (clique sur une ligne : plus besoin de copier l'ID)",
+                        column_widths=["30%", "20%", "26%", "24%"],
+                        label="Clique sur une ligne pour choisir le run",
                     )
-                    id_affiche = gr.Markdown("ID : —")
-                    bouton_actualiser = gr.Button("Actualiser la liste", size="sm")
                 with gr.Column(scale=9):
                     with gr.Column(elem_classes="carte"):
-                        gr.Markdown(
-                            "**Relancer le run choisi**\n\n"
-                            "- Il a plante (credit, Ollama, port occupe) : regle le probleme et garde le "
-                            "premier choix, AutoDev repart la ou il s'est arrete.\n"
-                            "- Tu as modifie un agent : choisis l'etape d'ou repartir. "
-                            "Les etapes d'avant ne sont pas refaites."
-                        )
+                        id_affiche = gr.Textbox(label="ID du run choisi", interactive=False, buttons=["copy"],
+                                                placeholder="Aucun run choisi")
+                        panneau_run = gr.HTML()
                         etape_relance = gr.Dropdown(
                             choices=list(ETAPES_REJOUABLES), value=list(ETAPES_REJOUABLES)[0],
-                            label="Relancer a partir de",
+                            label="Relancer à partir de (les étapes d'avant ne sont ni refaites ni repayées)",
                         )
                         bouton_relancer = gr.Button(TEXTE_AUCUN_RUN_CHOISI, variant="primary", interactive=False)
-                    bouton_plan = gr.DownloadButton("Telecharger le plan de test", visible=False, size="sm")
-                    with gr.Row():
-                        boutons_fichiers = [
-                            gr.DownloadButton(texte, visible=False, size="sm")
-                            for texte in ("Telecharger les user stories", "Telecharger l'architecture",
-                                          "Telecharger le code genere (zip, sans .env)",
-                                          "Telecharger les captures et videos E2E (zip)")
-                        ]
+                        bouton_nouveau_projet = gr.Button("Relancer comme nouveau projet (formulaire prérempli)",
+                                                          visible=False)
+                    with gr.Column(elem_classes="carte"):
+                        gr.Markdown("**Télécharger** · Documents")
+                        with gr.Row():
+                            boutons_fichiers = [
+                                gr.DownloadButton(texte, visible=False, size="sm")
+                                for texte in ("User stories", "Architecture")
+                            ]
+                            bouton_plan = gr.DownloadButton("Plan de test", visible=False, size="sm")
+                        gr.Markdown("Code et preuves")
+                        with gr.Row():
+                            boutons_fichiers += [
+                                gr.DownloadButton(texte, visible=False, size="sm")
+                                for texte in ("Code généré (zip, sans .env)", "Captures et vidéos E2E (zip)")
+                            ]
             vue_choisie = gr.HTML(VUE_CHOISIR_UN_RUN)
+            galerie_captures = gr.Gallery(
+                label="Captures et vidéos E2E : clique pour agrandir, flèches pour passer à la suivante",
+                columns=4, height="auto", object_fit="contain", visible=False,
+            )
 
     # Composants caches, utilises par les fonctions du pipeline
     liens = gr.HTML(visible=False)  # les liens sont affiches sous le run choisi
@@ -1905,10 +2137,10 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
     )
     demo.load(fn=charger_page, outputs=[table_runs, ids_runs, id_run, id_affiche, resultat_state,
                                         vue_choisie, liens, bouton_plan, etape_relance, bouton_relancer,
-                                        *boutons_fichiers])
+                                        *boutons_fichiers, panneau_run, bouton_nouveau_projet, galerie_captures])
     # Le suivi (onglet « Run en cours ») et l'historique suivent le run
     resultat_state.change(fn=vue_suivi, inputs=resultat_state, outputs=suivi)
-    resultat_state.change(fn=apres_changement_du_run, inputs=resultat_state,
+    resultat_state.change(fn=apres_changement_du_run, inputs=[resultat_state, filtre_runs, recherche_runs],
                           outputs=[table_runs, ids_runs, etape_relance, bouton_relancer, id_affiche, vue_choisie])
     resultat_texte.change(fn=alerte_depuis_texte, inputs=resultat_texte, outputs=alerte)
     minuteur = gr.Timer(5)
@@ -1927,9 +2159,13 @@ with gr.Blocks(title="AutoDev — Generateur de backend et frontend automatique"
     table_runs.select(
         fn=choisir_run, inputs=[ids_runs],
         outputs=[id_run, id_affiche, vue_choisie, liens, bouton_plan, etape_relance, bouton_relancer,
-                 *boutons_fichiers],
+                 *boutons_fichiers, panneau_run, bouton_nouveau_projet, galerie_captures],
     )
-    bouton_actualiser.click(fn=actualiser_runs, outputs=[table_runs, ids_runs])
+    bouton_actualiser.click(fn=actualiser_runs, inputs=[filtre_runs, recherche_runs], outputs=[table_runs, ids_runs])
+    filtre_runs.change(fn=actualiser_runs, inputs=[filtre_runs, recherche_runs], outputs=[table_runs, ids_runs])
+    recherche_runs.change(fn=actualiser_runs, inputs=[filtre_runs, recherche_runs], outputs=[table_runs, ids_runs])
+    bouton_nouveau_projet.click(fn=preremplir_depuis_run, inputs=[id_run],
+                                outputs=[*champs_formulaire, onglets])
     etape_relance.change(fn=libelle_relancer, inputs=etape_relance, outputs=bouton_relancer)
 
 

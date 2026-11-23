@@ -16,3 +16,16 @@
 
 - **Aucun secret en dur dans le code : mots de passe, cles et adresses de base lus dans les variables d'environnement.**
   Pourquoi : le code part sur GitHub, le .env jamais.
+- **Une cle ou un service externe absent (cle API, connecteur non configure) donne une erreur 503 qui nomme ce qui manque (ex : « Assistant indisponible : clé API non configurée ») ; ne remplace jamais ce message par un message generique.**
+  Pourquoi : « réessayez plus tard » cache la cause ; l'administrateur attend au lieu de configurer la clé.
+  Origine : GenieLab Hub, E16, le message précis est devenu « réessayez plus tard » pendant la correction.
+
+- **Si un test echoue seulement parce qu'une cle ou un service externe manque dans l'environnement, ne modifie pas le code pour le faire passer : le code est juste, c'est la configuration qui manque.**
+  Pourquoi : aucune modification du code ne crée une clé ; chaque essai est payé pour rien.
+  Origine : GenieLab Hub, E16 et E29, 6 corrections inutiles sur 3 essais.
+
+- **Les messages affiches a l'utilisateur sont ecrits en francais correct, avec les accents.**
+  Origine : GenieLab Hub, « cle non configuree », « Demo : evenement ajoute a Outlook ».
+  - **Pendant une correction des Tests E2E, n'ajoute aucune nouvelle dependance externe (commande comme claude, service, paquet systeme).**
+  Pourquoi : la Dockerization et la Validation Docker ne sont pas rejouées ; la dépendance manquerait dans l'image.
+  Origine : GenieLab Hub, plan B claude -p ajouté pendant la correction d'E16, absent de l'image.

@@ -20,3 +20,6 @@
 
 - **L'application tourne avec un utilisateur non-root (instruction USER apres le dernier FROM).**
   Contrôle : la Validation Docker refuse un Dockerfile exécuté en root.
+- **Une cle ou un secret dont depend une fonctionnalite (ex : ANTHROPIC_API_KEY) est liste dans .env.example avec un commentaire qui explique a quoi il sert et ou l'obtenir ; dans docker-compose.yml, garde ${VARIABLE:-} pour que l'application demarre sans.**
+  Pourquoi : l'application doit démarrer pour être testée ; la personne qui la lance doit savoir quelle clé ajouter.
+  Origine : GenieLab Hub, ANTHROPIC_API_KEY vide sans explication, assistant en 503.

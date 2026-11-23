@@ -25,3 +25,21 @@
   Origine : GenieLab Hub, une seule capture (la fin) par scénario.
 
 - **N'affiche jamais un mot de passe dans un message d'assertion.**
+- **Chaque user story a au moins un scenario d'interface, en plus des scenarios API ; plusieurs user stories peuvent partager une page, pas un scenario.**
+  Pourquoi : une règle par page laisse des user stories vérifiées seulement par l'API, sans capture.
+  Origine : GenieLab Hub, 9 scénarios d'interface pour 23 user stories.
+
+- **Chaque refus est verifie deux fois : dans l'interface (bouton ou menu absent, page refusee) et par l'API (reponse 403 ou 404). Pour une ressource d'un autre role ou d'un autre perimetre, teste aussi l'ouverture par URL directe.**
+  Pourquoi : un menu qui cache un lien ne protège rien si l'API reste ouverte.
+
+- **Pour chaque formulaire, un scenario soumet les champs obligatoires vides et verifie le message d'erreur.**
+  Pourquoi : les refus de saisie sont rarement testés et souvent absents.
+
+- **Les donnees de test utilisent des noms accentues (ex : « Élise Marchand », « Anaïs Côté ») ; verifie qu'ils restent intacts apres rechargement de la page, et dans les exports s'il y en a.**
+  Pourquoi : les accents cassés ne se voient qu'à l'écran ou dans un fichier exporté.
+  Origine : plan manuel, STK-05.
+
+- **Aucun scenario sans assertion sur le resultat attendu ; un scenario qui ne fait que naviguer ne compte pas.**
+
+- **En tete du fichier de scenarios, ecris en commentaire un tableau de couverture : user story → scenarios API et interface.**
+  Pourquoi : on voit d'un coup d'œil quelle user story n'est pas couverte.

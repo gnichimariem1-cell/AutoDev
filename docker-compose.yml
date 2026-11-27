@@ -1,6 +1,9 @@
 services:
   autodev:
     build: .
+    # Petit init (tini) en PID 1 : transmet SIGTERM a python, qui s'arrete
+    # proprement au lieu d'etre tue au bout de 10 s (code 137).
+    init: true
     ports:
       - "7860:7860"
     env_file:

@@ -264,12 +264,14 @@ def etapes_non_effectuees(valeurs) -> list[str]:
     if (e2e is not None and not getattr(e2e, "docker_disponible", True)
             and "desactiv" not in " ".join(getattr(e2e, "erreurs", []) or []).lower()):
         sautees.append("e2e")
+    if e2e is not None and getattr(e2e, "docker_disponible", True) and getattr(e2e, "navigateur", True) is False:
+        sautees.append("interface")  # Chromium absent : seuls les scenarios API ont ete lances
     return sautees
 
 
 def historique_runs(limite: int = 30) -> list[dict]:
     """Les runs sauvegardes, du plus recent au plus ancien. Pour chacun :
-    id_run, titre, date, statut (SUCCES, ECHEC, PLANTAGE, INTERROMPU),
+    id_run, titre, date, statut (SUCCES, VALIDATION INCOMPLETE, ECHECS E2E, BLOCAGE MACHINE, ECHEC, PLANTAGE, INTERROMPU),
     etape (ou il s'est arrete), archive (fichiers deplaces par un run plus recent)."""
     saver = GRAPHE.checkpointer
     if hasattr(saver, "setup"):
@@ -293,8 +295,12 @@ def historique_runs(limite: int = 30) -> list[dict]:
         elif valeurs.get("succes"):
             sautees = etapes_non_effectuees(valeurs)
             if sautees:
-                statut = "SUCCES PARTIEL"
-                etape = "docker (non effectuee)" if "docker" in sautees else "e2e (non effectues)"
+                statut = "VALIDATION INCOMPLETE"
+                etape = ("docker (non effectuee)" if "docker" in sautees
+                         else "e2e (non effectues)" if "e2e" in sautees else "e2e (interface non testee)")
+            elif getattr(valeurs.get("rapport_e2e"), "echecs", None):
+                # Des scenarios echouent encore apres toutes les corrections : pas un succes
+                statut, etape = "ECHECS E2E", "e2e"
             else:
                 statut, etape = "SUCCES", ""
         else:
@@ -305,6 +311,8 @@ def historique_runs(limite: int = 30) -> list[dict]:
             e2e = valeurs.get("rapport_e2e")
             if etape == "e2e" and e2e is not None and getattr(e2e, "erreur_environnement", False):
                 etape = "e2e (machine)"
+            if str(etape).endswith("(machine)"):
+                statut = "BLOCAGE MACHINE"  # probleme de la machine, pas du code genere
         marqueur = Path(valeurs.get("dossier_docker", "output")) / FICHIER_ID_RUN
         archive = marqueur.exists() and marqueur.read_text().strip() != id_run
         besoin = valeurs.get("besoin")

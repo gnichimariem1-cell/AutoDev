@@ -93,15 +93,69 @@ def test_les_sections_ouvertes_restent_ouvertes(monkeypatch):
     assert "app_id" in options["head"] and "AutoDev a redémarré" in options["head"]
 
 
-def test_docker_non_joignable_succes_partiel():
-    """Docker non joignable : le run se termine, mais il est affiche SUCCES PARTIEL, pas SUCCES."""
+def test_docker_non_joignable_validation_incomplete():
+    """Docker non joignable : le run se termine, mais il est affiche VALIDATION INCOMPLETE, pas SUCCES."""
     from types import SimpleNamespace as NS
     from src.agent_form import app
     sans_docker = {"succes": True, "rapport_validation_docker": NS(succes=False, docker_disponible=False),
                    "rapport_e2e": NS(docker_disponible=False, succes=False, erreurs=["Docker n'est pas joignable."])}
-    assert app.statut_du_run(sans_docker) == "SUCCES PARTIEL"
+    assert app.statut_du_run(sans_docker) == "VALIDATION INCOMPLETE"
     assert "Validation Docker" in app.message_en_ce_moment(sans_docker)
     desactive = {"succes": True, "rapport_validation_docker": NS(succes=True, docker_disponible=True),
                  "rapport_e2e": NS(docker_disponible=False, succes=False, erreurs=["Tests E2E desactives (E2E_ACTIF=0)."])}
     assert app.statut_du_run(desactive) == "SUCCES"
     assert app.statut_du_run({"succes": True}) == "SUCCES"
+
+
+# ---------- Remarque 6 : un run avec des echecs E2E restants n'est pas un SUCCES ----------
+
+def test_echecs_e2e_restants_ne_sont_pas_un_succes():
+    from types import SimpleNamespace
+    from src.agent_form import app
+    echec = SimpleNamespace(id="E27")
+    rapport = SimpleNamespace(echecs=[echec], reussis=29, total=30, docker_disponible=True, erreurs=[])
+    resultat = {"succes": True, "rapport_e2e": rapport}
+    assert app.statut_du_run(resultat) == "ECHECS E2E"
+    assert "E27" in app.message_en_ce_moment(resultat)
+    assert "29/30" in app.message_en_ce_moment(resultat)
+    tout_ok = {"succes": True, "rapport_e2e": SimpleNamespace(echecs=[], docker_disponible=True, erreurs=[])}
+    assert app.statut_du_run(tout_ok) == "SUCCES"
+    assert app.COULEURS_STATUT["ECHECS E2E"][1] == "#B45309"   # orange, pas rouge
+
+
+# ---------- Remarque 6, partie 2 : validation incomplete, blocage machine, filtres exacts ----------
+
+def test_chromium_absent_validation_incomplete():
+    from types import SimpleNamespace
+    from src.agent_form import app
+    sans_navigateur = {"succes": True,
+                       "rapport_validation_docker": SimpleNamespace(succes=True, docker_disponible=True),
+                       "rapport_e2e": SimpleNamespace(docker_disponible=True, succes=True, navigateur=False,
+                                                      echecs=[], erreurs=[])}
+    assert app.statut_du_run(sans_navigateur) == "VALIDATION INCOMPLETE"
+    assert "navigateur" in app.message_en_ce_moment(sans_navigateur)
+
+
+def test_port_occupe_blocage_machine():
+    from types import SimpleNamespace
+    from src.agent_form import app
+    port_occupe = {"succes": False, "etape": "docker",
+                   "rapport_validation_docker": SimpleNamespace(succes=False, docker_disponible=True,
+                                                                erreur_environnement=True)}
+    assert app.statut_du_run(port_occupe) == "BLOCAGE MACHINE"
+    code_ko = {"succes": False, "etape": "docker",
+               "rapport_validation_docker": SimpleNamespace(succes=False, docker_disponible=True,
+                                                            erreur_environnement=False)}
+    assert app.statut_du_run(code_ko) == "ECHEC"
+
+
+def test_filtre_echec_ne_montre_pas_les_echecs_e2e(monkeypatch):
+    from src.agent_form import app
+    runs = [{"id_run": "a", "titre": "Labo IA", "date": "", "statut": "ECHECS E2E", "etape": "e2e", "archive": False},
+            {"id_run": "b", "titre": "Conges", "date": "", "statut": "BLOCAGE MACHINE",
+             "etape": "docker (machine)", "archive": True},
+            {"id_run": "c", "titre": "Blog", "date": "", "statut": "ECHEC", "etape": "qa_backend", "archive": True}]
+    monkeypatch.setattr(app, "historique_runs", lambda *a, **k: runs)
+    assert app.runs_pour_tableau("Échec")[1] == ["c"]
+    assert app.runs_pour_tableau("Échecs E2E")[1] == ["a"]
+    assert app.runs_pour_tableau("Blocage machine")[1] == ["b"]

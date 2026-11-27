@@ -291,7 +291,9 @@ def _ligne_titre(resultat) -> str:
     if noeud_en_cours:
         return f"⏳ EN COURS — derniere etape terminee : {LIBELLES_NOEUDS.get(noeud_en_cours, noeud_en_cours)}"
     if resultat["succes"] and etapes_non_effectuees(resultat):
-        return "⚠️ SUCCES PARTIEL — Validation Docker et tests E2E non effectues : Docker n'etait pas joignable"
+        if etapes_non_effectuees(resultat) == ["interface"]:
+            return "⚠️ VALIDATION INCOMPLETE — scenarios d'interface non joues : navigateur absent de l'image AutoDev"
+        return "⚠️ VALIDATION INCOMPLETE — Validation Docker et tests E2E non effectues : Docker n'etait pas joignable"
     if resultat["succes"]:
         return "✅ SUCCES — pipeline complet"
     if resultat.get("demande_a_preciser"):
@@ -680,7 +682,8 @@ ETAPES_ECHEC_LISIBLES = {"backend": "QA Backend", "frontend": "QA Frontend", "do
                          "e2e (machine)": "Tests E2E (machine)",
                          "docker (non effectuee)": "Validation Docker (Docker non joignable)",
                          "e2e (non effectues)": "Tests E2E (Docker non joignable)"}
-COULEURS_STATUT = {"SUCCES PARTIEL": ("#FFFBEB", "#B45309"), "SUCCES": ("#ECFDF5", "#047857"), "ECHEC": ("#FEF2F2", "#B91C1C"),
+COULEURS_STATUT = {"ECHECS E2E": ("#FFFBEB", "#B45309"), "VALIDATION INCOMPLETE": ("#FFFBEB", "#B45309"),
+                   "BLOCAGE MACHINE": ("#F5F3FF", "#6D28D9"), "SUCCES": ("#ECFDF5", "#047857"), "ECHEC": ("#FEF2F2", "#B91C1C"),
                    "PLANTAGE": ("#FEF2F2", "#B91C1C"), "INTERROMPU": ("#FFF7ED", "#C2410C"),
                    "EN COURS": ("#FFF7ED", "#C2410C"), "A PRECISER": ("#FFFBEB", "#B45309")}
 MESSAGES_ETAPE = {
@@ -797,7 +800,8 @@ def _e(texte) -> str:
 # ---------- Historique ----------
 
 # Filtres de « Runs existants » : libelle -> debut du statut (None : tous les runs)
-FILTRES_RUNS = {"Tous": None, "Succès": "SUCCES", "Échec": "ECHEC", "Plantage": "PLANTAGE",
+FILTRES_RUNS = {"Tous": None, "Succès": "SUCCES", "Incomplet": "VALIDATION INCOMPLETE", "Échecs E2E": "ECHECS E2E",
+                "Échec": "ECHEC", "Blocage machine": "BLOCAGE MACHINE", "Plantage": "PLANTAGE",
                 "Interrompu": "INTERROMPU", "En cours": "EN COURS"}
 
 
@@ -821,7 +825,7 @@ def runs_pour_tableau(filtre: str = "Tous", recherche: str = "") -> tuple[list[l
         statut = run["statut"] + (" · archivé" if run["archive"] else "")
         if run["id_run"] == actif:
             statut, arret = "EN COURS", "—"
-        if debut and not statut.startswith(debut):  # « Succès » garde aussi SUCCES PARTIEL
+        if debut and statut.split(" · ")[0] != debut:  # statut exact, « · archivé » ignore
             continue
         if cherche and cherche not in _sans_accents(run["titre"]):
             continue
@@ -980,7 +984,14 @@ def statut_du_run(resultat) -> str:
     if resultat.get("erreur"):
         return "PLANTAGE"
     if resultat.get("succes"):
-        return "SUCCES PARTIEL" if etapes_non_effectuees(resultat) else "SUCCES"
+        if etapes_non_effectuees(resultat):
+            return "VALIDATION INCOMPLETE"
+        if getattr(resultat.get("rapport_e2e"), "echecs", None):
+            return "ECHECS E2E"
+        return "SUCCES"
+    if any(getattr(resultat.get(cle), "erreur_environnement", False)
+           for cle in ("rapport_validation_docker", "rapport_e2e")):
+        return "BLOCAGE MACHINE"
     return "ECHEC"
 
 
@@ -991,10 +1002,20 @@ def message_en_ce_moment(resultat) -> str:
     statut = statut_du_run(resultat)
     if statut == "SUCCES":
         return "Termine : l'application est prete dans output/ (backend, frontend, Docker et plan de test)."
-    if statut == "SUCCES PARTIEL":
+    if statut == "VALIDATION INCOMPLETE" and etapes_non_effectuees(resultat) == ["interface"]:
+        return ("Termine, mais les scenarios d'interface n'ont pas ete joues : le navigateur n'est pas installe "
+                "dans l'image AutoDev (seuls les scenarios API ont ete lances). Reconstruis l'image AutoDev, "
+                "puis relance a partir de « Tests E2E ».")
+    if statut == "VALIDATION INCOMPLETE":
         return ("Termine, mais l'application n'a ete ni demarree ni testee de bout en bout : Docker n'etait pas "
                 "joignable (Validation Docker et tests E2E non effectues). Demarre AutoDev avec "
                 "docker-compose.validation.yml, puis Relancer a partir de « Validation Docker ».")
+    if statut == "ECHECS E2E":
+        rapport = resultat["rapport_e2e"]
+        return (f"Termine, mais {len(rapport.echecs)} scenario(s) E2E echouent encore apres toutes les "
+                f"corrections ({rapport.reussis}/{rapport.total} reussis, en echec : "
+                f"{', '.join(e.id for e in rapport.echecs)}). Le code est dans output/ : ouvre la carte "
+                "« Tests E2E » pour voir pourquoi, corrige la cause, puis relance a partir de « Tests E2E ».")
     if statut == "A PRECISER":
         analyse = resultat["demande_a_preciser"]
         if analyse.scenarios:
@@ -1012,7 +1033,7 @@ def message_en_ce_moment(resultat) -> str:
         return (f"{etape} a plante : {resultat.get('erreur')}. Regle le probleme, puis clique sur Relancer "
                 "(onglet « Runs existants ») : les etapes reussies ne sont pas refaites.")
     etats = etats_des_etapes(resultat)
-    if statut == "ECHEC":
+    if statut in ("ECHEC", "BLOCAGE MACHINE"):
         for libelle, etat, detail in etats:
             if etat == "ko":
                 if detail == "machine":
@@ -1401,9 +1422,13 @@ def vue_run(resultat, avec_chrono=False) -> str:
     titre = besoin.titre_projet if besoin else ""
     chrono = chrono_du_run(resultat) if avec_chrono else ""
     en_cours = statut == "EN COURS"
-    fond_message = {"EN COURS": "#FFEDD5", "SUCCES": "#DCFCE7", "SUCCES PARTIEL": "#FEF3C7"}.get(statut, "#FEE2E2")
-    couleur_message = {"EN COURS": "#7C2D12", "SUCCES": "#14532D", "SUCCES PARTIEL": "#78350F"}.get(statut, "#7F1D1D")
-    titre_message = {"EN COURS": "En ce moment", "SUCCES": "Resultat", "SUCCES PARTIEL": "Resultat"}.get(statut, "A faire")
+    fond_message = {"EN COURS": "#FFEDD5", "SUCCES": "#DCFCE7", "VALIDATION INCOMPLETE": "#FEF3C7",
+                    "BLOCAGE MACHINE": "#EDE9FE",
+                    "ECHECS E2E": "#FEF3C7"}.get(statut, "#FEE2E2")
+    couleur_message = {"EN COURS": "#7C2D12", "SUCCES": "#14532D", "VALIDATION INCOMPLETE": "#78350F",
+                       "BLOCAGE MACHINE": "#4C1D95",
+                       "ECHECS E2E": "#78350F"}.get(statut, "#7F1D1D")
+    titre_message = {"EN COURS": "En ce moment", "SUCCES": "Resultat"}.get(statut, "A faire")
     return (
         f'<div style="border:1px solid {"#FDBA74" if en_cours else "#E5E7EB"};border-radius:12px;padding:14px 16px;'
         f'background:{"#FFFBF5" if en_cours else "#FFFFFF"}">'
@@ -1488,13 +1513,16 @@ def _etape_proposee(choix, resultat) -> str:
     if choix[0].startswith(REPRISE) or not resultat:
         return choix[0]
     statut = statut_du_run(resultat)
-    if statut == "SUCCES PARTIEL" and "Validation Docker" in choix:
-        return "Validation Docker"  # repartir la ou Docker n'etait pas joignable
-    if statut == "ECHEC":
+    if statut == "VALIDATION INCOMPLETE":
+        # Chromium absent : rejouer les Tests E2E ; Docker absent : repartir de la Validation Docker
+        etape = "Tests E2E" if etapes_non_effectuees(resultat) == ["interface"] else "Validation Docker"
+        if etape in choix:
+            return etape
+    if statut in ("ECHEC", "BLOCAGE MACHINE"):
         etape = ETAPE_A_REFAIRE_APRES_ECHEC.get(str(resultat.get("etape", "")).split(" ")[0])
         if etape in choix:
             return etape
-    if statut == "SUCCES" and getattr(resultat.get("rapport_e2e"), "echecs", None) and "Tests E2E" in choix:
+    if statut == "ECHECS E2E" and "Tests E2E" in choix:
         return "Tests E2E"  # scenarios encore KO : on les rejoue (ex : apres avoir ajoute une cle)
     return choix[0]
 
@@ -1531,8 +1559,11 @@ def panneau_du_run(id_run, resultat) -> str:
                         "#FFF7ED", "#FDBA74", "#7C2D12")
     if run_archive(resultat):
         commande = f"cd archives/{id_run} ; docker compose -p {id_run} up -d"
-        if statut.startswith("SUCCES"):
-            return _encadre("Run réussi, archivé.",
+        titres_fin = {"SUCCES": "Run réussi, archivé.",
+                      "VALIDATION INCOMPLETE": "Run terminé sans validation complète, archivé.",
+                      "ECHECS E2E": "Run terminé avec des échecs E2E, archivé."}
+        if statut in titres_fin:
+            return _encadre(titres_fin[statut],
                             "Un run plus récent a remplacé output/. Ses fichiers restent téléchargeables, "
                             "mais il ne peut plus être relancé ici. Pour revoir son application :",
                             "#F3F4F6", "#D1D5DB", "#1F2937", commande)
@@ -1540,7 +1571,7 @@ def panneau_du_run(id_run, resultat) -> str:
                         "Un run plus récent a remplacé output/ : ce run ne peut plus être repris. "
                         "Corrigez la cause (règle de l'agent, clé, machine), puis « Relancer comme "
                         "nouveau projet ».", "#FEF2F2", "#FCA5A5", "#7F1D1D")
-    if statut == "SUCCES":
+    if statut in ("SUCCES", "ECHECS E2E"):
         echecs = getattr(resultat.get("rapport_e2e"), "echecs", None) or []
         if echecs:
             rapport = resultat["rapport_e2e"]
@@ -1556,7 +1587,7 @@ def panneau_du_run(id_run, resultat) -> str:
 
 def bouton_nouveau_projet_pour(resultat):
     """« Relancer comme nouveau projet » : pour un run archive qui n'a pas reussi."""
-    return gr.update(visible=run_archive(resultat) and not statut_du_run(resultat).startswith("SUCCES")
+    return gr.update(visible=run_archive(resultat) and statut_du_run(resultat) not in ("SUCCES", "VALIDATION INCOMPLETE")
                      and bool(resultat.get("besoin")))
 
 
